@@ -94,15 +94,6 @@ const ParticlesBackground = () => {
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '');
-  const [userInfo, setUserInfo] = useState(null);
-  const [usuarios, setUsuarios] = useState([]);
-  const [clases, setClases] = useState([]);
-  const [asistencias, setAsistencias] = useState([]);
-  const [calificaciones, setCalificaciones] = useState([]);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [activeModule, setActiveModule] = useState('usuarios');
-  const [loading, setLoading] = useState(false);
 
   // Mostrar/ocultar notificaciones automáticamente
   useEffect(() => {
