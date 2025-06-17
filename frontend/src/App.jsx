@@ -1,99 +1,45 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import { FaUser, FaChalkboardTeacher, FaClipboardCheck, FaGraduationCap, FaSignOutAlt, FaLock, FaEnvelope } from 'react-icons/fa';
-import Particles from 'react-tsparticles';
-import { loadSlim } from 'tsparticles-slim';
-
-import UsuariosList from './components/UsuariosList';
-import ClasesList from './components/ClasesList';
-import AsistenciasList from './components/AsistenciasList';
-import CalificacionesList from './components/CalificacionesList';
-
-const ParticlesBackground = () => {
-  const particlesInit = async (engine) => {
-    await loadSlim(engine);
-  };
-
-  return (
-    <Particles
-      id="tsparticles"
-      init={particlesInit}
-      options={{
-        fpsLimit: 60,
-        interactivity: {
-          events: {
-            onClick: {
-              enable: true,
-              mode: "push",
-            },
-            onHover: {
-              enable: true,
-              mode: "repulse",
-            },
-          },
-          modes: {
-            push: {
-              quantity: 4,
-            },
-            repulse: {
-              distance: 100,
-              duration: 0.4,
-            },
-          },
-        },
-        particles: {
-          color: {
-            value: "#ffffff",
-          },
-          links: {
-            color: "#ffffff",
-            distance: 150,
-            enable: true,
-            opacity: 0.3,
-            width: 1,
-          },
-          move: {
-            direction: "none",
-            enable: true,
-            outModes: {
-              default: "bounce",
-            },
-            random: false,
-            speed: 2,
-            straight: false,
-          },
-          number: {
-            density: {
-              enable: true,
-            },
-            value: 80,
-          },
-          opacity: {
-            value: 0.5,
-          },
-          shape: {
-            type: "circle",
-          },
-          size: {
-            value: { min: 1, max: 3 },
-          },
-        },
-        detectRetina: true,
-      }}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        zIndex: 0
-      }}
-    />
-  );
-};
+import Login from './inicio/index.jsx';
+import AdminDashboard from './admin/dashboard.jsx';
+import ProfesorPage from './docente/index.jsx';
+import AlumnoPage from './alumno/index.jsx';
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem('token') || '');
+  // Estados principales
+  const [token, setToken] = useState('');
+  const [userInfo, setUserInfo] = useState(null);
+  const [usuarios, setUsuarios] = useState([]);
+  const [clases, setClases] = useState([]);
+  const [asistencias, setAsistencias] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
+  const [calificaciones, setCalificaciones] = useState([]);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [activeModule, setActiveModule] = useState('usuarios');
+  const [loading, setLoading] = useState(false);
+  const [asignacionesDocente, setAsignacionesDocente] = useState([]);
+  const [loadingAsignacionesDocente, setLoadingAsignacionesDocente] = useState(false);
+  const [errorAsignacionesDocente, setErrorAsignacionesDocente] = useState('');
+  const [estudiantes, setEstudiantes] = useState([]);
+  const [cursosConProfesor, setCursosConProfesor] = useState([]);
+
+  // Función auxiliar para decodificar JWT - MOVER A ESTA POSICIÓN
+  const decodeToken = useCallback((token) => {
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
+      throw new Error('Token malformado');
+    }
+    
+    const payload = JSON.parse(atob(tokenParts[1]));
+    
+    // Validar que el payload tenga los campos necesarios
+    if (!payload.id || !payload.nombre || !payload.rol) {
+      throw new Error('Token no contiene información válida del usuario');
+    }
+    
+    return payload;
+  }, []);
 
   // Mostrar/ocultar notificaciones automáticamente
   useEffect(() => {
@@ -106,453 +52,557 @@ function App() {
     }
   }, [error, success]);
 
-  const showError = (message) => {
+  // Funciones de utilidad para mensajes
+  const showError = useCallback((message) => {
     setError(message);
     setSuccess('');
-  };
+  }, []);
 
-  const showSuccess = (message) => {
+  const showSuccess = useCallback((message) => {
     setSuccess(message);
     setError('');
-  };
+  }, []);
 
-  const clearData = () => {
+  const clearData = useCallback(() => {
     setUsuarios([]);
     setClases([]);
     setAsistencias([]);
+    setAsignaciones([]);
     setCalificaciones([]);
-  };
+    setAsignacionesDocente([]);
+    setEstudiantes([]);
+    setCursosConProfesor([]);
+    setErrorAsignacionesDocente('');
+  }, []);
 
+  // Función de logout
+  const handleLogout = useCallback(() => {
+    setToken('');
+    setUserInfo(null);
+    setActiveModule('usuarios');
+    clearData();
+    setError('');
+    setSuccess('');
+  }, [clearData]);
+
+  // Funciones de fetch con manejo de errores mejorado
   const fetchUsuarios = useCallback(async () => {
+    if (!token) return;
+    
     try {
       const res = await fetch('http://localhost:3002/usuarios', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
       });
-      if (!res.ok) throw new Error('Error al cargar usuarios');
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error ${res.status}: Error al cargar usuarios`);
+      }
+      
       const data = await res.json();
-      setUsuarios(data);
+      setUsuarios(Array.isArray(data) ? data : []);
     } catch (err) {
+      console.error('Error en fetchUsuarios:', err);
       showError(err.message);
       setUsuarios([]);
     }
-  }, [token]);
+  }, [token, showError]);
 
   const fetchClases = useCallback(async () => {
+    if (!token) return;
+    
     try {
       const res = await fetch('http://localhost:3005/materias', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
       });
-      if (!res.ok) throw new Error('Error al cargar clases');
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error ${res.status}: Error al cargar clases`);
+      }
+      
       const data = await res.json();
-      setClases(data);
+      setClases(Array.isArray(data) ? data : []);
     } catch (err) {
+      console.error('Error en fetchClases:', err);
       showError(err.message);
       setClases([]);
     }
-  }, [token]);
+  }, [token, showError]);
 
   const fetchAsistencias = useCallback(async () => {
+    if (!token) return;
+    
     try {
       const res = await fetch('http://localhost:3003/asistencias', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
       });
-      if (!res.ok) throw new Error('Error al cargar asistencias');
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error ${res.status}: Error al cargar asistencias`);
+      }
+      
       const data = await res.json();
-      setAsistencias(data);
+      setAsistencias(Array.isArray(data) ? data : []);
     } catch (err) {
+      console.error('Error en fetchAsistencias:', err);
       showError(err.message);
       setAsistencias([]);
+    }
+  }, [token, showError]);
+
+  const fetchAsignaciones = useCallback(async () => {
+    if (!token) return;
+    
+    try {
+      const res = await fetch('http://localhost:3007/asignaciones', {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error ${res.status}: Error al cargar asignaciones`);
+      }
+      
+      const data = await res.json();
+      setAsignaciones(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error en fetchAsignaciones:', err);
+      showError(err.message);
+      setAsignaciones([]);
+    }
+  }, [token, showError]);
+
+  const fetchAsignacionesDocente = useCallback(async () => {
+    if (!token) return;
+    
+    setLoadingAsignacionesDocente(true);
+    setErrorAsignacionesDocente('');
+    
+    try {
+      const response = await fetch('http://localhost:3007/asignaciones', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${await response.text() || 'Error desconocido'}`);
+      }
+      
+      const data = await response.json();
+       console.log("Datos de asignaciones de docente:", data);
+      
+      // Manejar diferentes formatos de respuesta
+      let asignacionesData = [];
+      if (data && data.data) {
+        asignacionesData = data.data; // Formato { data: [...] }
+      } else if (Array.isArray(data)) {
+        asignacionesData = data; // Formato array directo
+      }
+      
+      setAsignacionesDocente(asignacionesData);
+    } catch (err) {
+      console.error('Error en fetchAsignacionesDocente:', err);
+      setErrorAsignacionesDocente(err.message || 'Error al cargar asignaciones del docente');
+    } finally {
+      setLoadingAsignacionesDocente(false);
     }
   }, [token]);
 
   const fetchCalificaciones = useCallback(async () => {
+    if (!token) return;
+    
     try {
       const res = await fetch('http://localhost:3004/calificaciones', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
       });
-      if (!res.ok) throw new Error('Error al cargar calificaciones');
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error ${res.status}: Error al cargar calificaciones`);
+      }
+      
       const data = await res.json();
-      setCalificaciones(data);
+      setCalificaciones(Array.isArray(data) ? data : []);
     } catch (err) {
+      console.error('Error en fetchCalificaciones:', err);
       showError(err.message);
       setCalificaciones([]);
     }
-  }, [token]);
+  }, [token, showError]);
 
+  // Fetch estudiantes
+  const fetchEstudiantes = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('http://localhost:3002/usuarios', {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error al cargar estudiantes');
+      }
+      const data = await res.json();
+      setEstudiantes(Array.isArray(data) ? data.filter(u => u.rol === 'estudiante' || u.rol === 'alumno') : []);
+    } catch (err) {
+      console.error('Error en fetchEstudiantes:', err);
+      showError('No se pudieron cargar los estudiantes');
+      setEstudiantes([]);
+    }
+  }, [token, showError]);
+
+  // Fetch cursos con profesor asignado
+  const fetchCursosConProfesor = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('http://localhost:3007/asignaciones', {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error al cargar cursos');
+      }
+      const result = await res.json();
+      const dataArray = Array.isArray(result) ? result : (result.data || []);
+      const cursos = dataArray
+        .filter(a => a.profesor_nombre && a.curso_nombre)
+        .map(a => ({
+          nombre: a.curso_nombre,
+          profesor: a.profesor_nombre,
+          dia_semana: a.dia_semana,
+          hora_inicio: a.hora_inicio,
+          hora_fin: a.hora_fin,
+          fecha_inicio: a.fecha_inicio,
+          fecha_fin: a.fecha_fin,
+          max_alumnos: a.max_alumnos,
+          id: `${a.curso_nombre}-${a.profesor_nombre}`
+        }));
+      // Eliminar duplicados
+      const uniqueCursos = [];
+      const seen = new Set();
+      for (const c of cursos) {
+        const key = `${c.nombre}-${c.profesor}`;
+        if (!seen.has(key)) {
+          uniqueCursos.push(c);
+          seen.add(key);
+        }
+      }
+      setCursosConProfesor(uniqueCursos);
+    } catch (err) {
+      console.error('Error en fetchCursosConProfesor:', err);
+      showError('No se pudieron cargar los cursos');
+      setCursosConProfesor([]);
+    }
+  }, [token, showError]);
+
+  // Fetch cursos con profesor, capacidad y cupos disponibles desde el nuevo backend
+  const fetchCursosConProfesorNuevo = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:3007/cursos-con-profesor', {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error al cargar cursos del backend');
+      }
+      const data = await res.json();
+      // El backend ya devuelve { id, nombre, profesor, ... }
+      const cursos = Array.isArray(data) ? data.map(a => ({
+        id: a.id,
+        nombre: a.nombre,
+        profesor: a.profesor,
+        dia_semana: a.dia_semana,
+        hora_inicio: a.hora_inicio,
+        hora_fin: a.hora_fin,
+        fecha_inicio: a.fecha_inicio,
+        fecha_fin: a.fecha_fin,
+        max_alumnos: a.max_alumnos,
+        disponibles: a.disponibles
+      })) : [];
+      setCursosConProfesor(cursos);
+    } catch (err) {
+      console.error('Error en fetchCursosConProfesorNuevo:', err);
+      showError('No se pudieron cargar los cursos del backend');
+      setCursosConProfesor([]);
+    }
+  }, [showError]);
+
+  // Función para cargar todos los datos - Versión optimizada
   const fetchAll = useCallback(async () => {
+    if (!token) return;
+    
     setLoading(true);
     try {
-      await Promise.all([
-        fetchUsuarios(),
-        fetchClases(),
-        fetchAsistencias(),
-        fetchCalificaciones(),
-      ]);
+      const payload = decodeToken(token);
+      const userRole = payload.rol.toLowerCase();
+      
+      console.log("Cargando datos para el rol:", userRole);
+      
+      // Carga selectiva de datos según el rol
+      if (userRole === 'administrativo') {
+        // Si es administrador, carga todo
+        await fetchUsuarios();
+        await fetchClases();
+        await fetchAsistencias();
+        await fetchAsignaciones();
+        await fetchCalificaciones();
+        await fetchEstudiantes();
+        await fetchCursosConProfesorNuevo();
+      } 
+      else if (userRole === 'profesor') {
+        // Si es profesor, SOLO carga sus asignaciones
+        // Eliminamos las llamadas a servicios que no necesita y generan error 403
+        console.log("Cargando solo asignaciones para profesor:", payload.nombre);
+        await fetchAsignaciones();
+        // No llamamos a fetchCalificaciones() ni otros servicios innecesarios
+      }
+      else {
+        // Estudiantes u otros roles
+        await fetchClases();
+        await fetchAsignaciones();
+        // Otros datos específicos para estudiantes
+      }
+      
+      // Siempre cargar asignaciones de docente si el usuario es profesor
+      if (userRole === 'profesor') {
+        await fetchAsignacionesDocente();
+      }
+      
+    } catch (err) {
+      console.error('Error en fetchAll:', err);
+      showError('No se pudieron cargar todos los datos. Por favor, intenta nuevamente.');
     } finally {
       setLoading(false);
     }
-  }, [fetchUsuarios, fetchClases, fetchAsistencias, fetchCalificaciones]);
+  }, [token, fetchUsuarios, fetchClases, fetchAsistencias, fetchAsignaciones, 
+      fetchCalificaciones, fetchAsignacionesDocente, fetchEstudiantes, 
+      fetchCursosConProfesorNuevo, showError, decodeToken]);
 
+  // Decodificar token y cargar datos cuando cambie el token
   useEffect(() => {
     if (token) {
       try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setUserInfo({ id: payload.id, nombre: payload.nombre, rol: payload.rol });
+        const payload = decodeToken(token);
+        setUserInfo({ 
+          id: payload.id, 
+          nombre: payload.nombre, 
+          rol: payload.rol 
+        });
+        
+        // Cargar datos después de establecer userInfo
         fetchAll();
-      } catch {
-        showError('Token inválido');
+      } catch (err) {
+        console.error('Error al decodificar token:', err);
+        showError('Token inválido o expirado');
         handleLogout();
       }
     } else {
       setUserInfo(null);
       clearData();
     }
-  }, [token, fetchAll]);
+  }, [token, fetchAll, showError, clearData, handleLogout, decodeToken]);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  // Función de login con mejor manejo de errores
+  const handleLogin = async (email, password) => {
+    if (!email || !password) {
+      showError('Email y contraseña son requeridos');
+      return;
+    }
+
     setError('');
     setSuccess('');
-    const form = e.target;
-    const email = form.email.value;
-    const password = form.password.value;
+    setLoading(true);
 
     try {
       const res = await fetch('http://localhost:3001/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ email, password }),
       });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Error en login');
-      }
+      
       const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `Error ${res.status}: Error en el login`);
+      }
+      
+      if (!data.token) {
+        throw new Error('No se recibió token del servidor');
+      }
+      
       setToken(data.token);
-      localStorage.setItem('token', data.token);
       showSuccess('Login exitoso');
     } catch (err) {
-      showError(err.message);
+      console.error('Error en login:', err);
+      showError(err.message || 'Error de conexión al servidor');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    setToken('');
-    localStorage.removeItem('token');
-    setUserInfo(null);
-    clearData();
-  };
-
+  // Pantalla de login
   if (!token) {
     return (
-      <div style={{ 
-        position: 'relative', 
-        height: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        overflow: 'hidden',
-        background: 'linear-gradient(135deg, #0d6efd 0%, #6610f2 100%)'
-      }}>
-        <ParticlesBackground />
-        
-        <div className="card shadow-lg p-4" style={{ 
-          width: '100%', 
-          maxWidth: '400px',
-          zIndex: 1,
-          backgroundColor: 'rgba(255, 255, 255, 0.9)',
-          border: 'none',
-          borderRadius: '15px',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
-          backdropFilter: 'blur(5px)',
-          animation: 'fadeIn 0.6s ease-out forwards'
-        }}>
-          <div className="card-body text-center">
-            <div style={{
-              marginBottom: '2rem',
-              color: '#4a4a4a'
-            }}>
-              <h2 style={{
-                fontWeight: '600',
-                marginBottom: '0.5rem',
-                color: '#343a40'
-              }}>
-                <span style={{ color: '#0d6efd' }}>GO</span>English
-              </h2>
-              <p style={{ color: '#6c757d' }}>Sistema de Gestión Académica</p>
-            </div>
-            
-            <form onSubmit={handleLogin}>
-              <div className="mb-3">
-                <div className="input-group">
-                  <span className="input-group-text" style={{
-                    backgroundColor: '#f8f9fa',
-                    borderRight: 'none',
-                    borderTopLeftRadius: '10px',
-                    borderBottomLeftRadius: '10px'
-                  }}>
-                    <FaEnvelope style={{ color: '#6c757d' }} />
-                  </span>
-                  <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    className="form-control"
-                    placeholder="Correo electrónico"
-                    required
-                    style={{
-                      borderLeft: 'none',
-                      padding: '10px 15px',
-                      backgroundColor: '#f8f9fa',
-                      borderTopRightRadius: '10px',
-                      borderBottomRightRadius: '10px'
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="mb-4">
-                <div className="input-group">
-                  <span className="input-group-text" style={{
-                    backgroundColor: '#f8f9fa',
-                    borderRight: 'none',
-                    borderTopLeftRadius: '10px',
-                    borderBottomLeftRadius: '10px'
-                  }}>
-                    <FaLock style={{ color: '#6c757d' }} />
-                  </span>
-                  <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    className="form-control"
-                    placeholder="Contraseña"
-                    required
-                    style={{
-                      borderLeft: 'none',
-                      padding: '10px 15px',
-                      backgroundColor: '#f8f9fa',
-                      borderTopRightRadius: '10px',
-                      borderBottomRightRadius: '10px'
-                    }}
-                  />
-                </div>
-              </div>
-              
-              <button 
-                type="submit" 
-                className="btn btn-primary w-100 py-2"
-                style={{
-                  borderRadius: '25px',
-                  fontWeight: '600',
-                  letterSpacing: '0.5px',
-                  transition: 'all 0.3s',
-                  boxShadow: '0 4px 15px rgba(13, 110, 253, 0.3)',
-                  border: 'none',
-                  marginBottom: '1rem'
-                }}
-                onMouseEnter={(e) => e.target.style.transform = 'translateY(-2px)'}
-                onMouseLeave={(e) => e.target.style.transform = 'translateY(0)'}
-              >
-                Iniciar sesión
-              </button>
-              
-              {error && (
-                <div className="alert alert-danger mt-3" style={{
-                  borderRadius: '10px',
-                  border: 'none'
-                }}>
-                  {error}
-                </div>
-              )}
-            </form>
-            
-            <div className="mt-4" style={{ color: '#6c757d', fontSize: '0.9rem' }}>
-              <p>¿Problemas para ingresar? <a href="#" style={{ color: '#0d6efd', textDecoration: 'none' }}>Contacta al administrador</a></p>
-            </div>
-          </div>
-        </div>
-
-        <style>{`
-          @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-          
-          .input-group:focus-within .input-group-text {
-            background-color: #e9ecef !important;
-          }
-          
-          .input-group:focus-within .form-control {
-            background-color: white !important;
-            box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.1);
-          }
-        `}</style>
-      </div>
+      <Login 
+        onLogin={handleLogin} 
+        error={error} 
+        loading={loading}
+        success={success}
+      />
     );
   }
 
-  if (!userInfo) {
+  // Pantalla de carga inicial
+  if (!userInfo || loading) {
     return (
       <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
-        <div className="spinner-border text-primary" role="status">
-          <span className="visually-hidden">Cargando...</span>
+        <div className="text-center">
+          <div className="spinner-border text-primary mb-3" role="status">
+            <span className="visually-hidden">Cargando...</span>
+          </div>
+          <p className="text-muted">Cargando información del usuario...</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="d-flex" style={{ minHeight: '100vh' }}>
-      {/* Sidebar */}
-      <nav className="d-flex flex-column bg-dark text-white p-3" style={{ width: '250px' }}>
-        <div className="d-flex align-items-center mb-4">
-          <div className="bg-primary rounded-circle p-2 me-2">
-            <FaUser size={20} />
-          </div>
-          <div>
-            <h5 className="mb-0">{userInfo.nombre}</h5>
-            <small className="text-muted">{userInfo.rol}</small>
-          </div>
-        </div>
-        
-        <hr className="my-2" />
-        
-        <ul className="nav nav-pills flex-column mb-auto">
-          <li className="nav-item mb-2">
-            <button
-              className={`nav-link w-100 text-start d-flex align-items-center ${
-                activeModule === 'usuarios' ? 'active bg-primary' : 'text-white'
-              }`}
-              onClick={() => setActiveModule('usuarios')}
-            >
-              <FaUser className="me-2" />
-              Usuarios
-            </button>
-          </li>
-          <li className="nav-item mb-2">
-            <button
-              className={`nav-link w-100 text-start d-flex align-items-center ${
-                activeModule === 'clases' ? 'active bg-primary' : 'text-white'
-              }`}
-              onClick={() => setActiveModule('clases')}
-            >
-              <FaChalkboardTeacher className="me-2" />
-              Clases
-            </button>
-          </li>
-          <li className="nav-item mb-2">
-            <button
-              className={`nav-link w-100 text-start d-flex align-items-center ${
-                activeModule === 'asistencias' ? 'active bg-primary' : 'text-white'
-              }`}
-              onClick={() => setActiveModule('asistencias')}
-            >
-              <FaClipboardCheck className="me-2" />
-              Asistencias
-            </button>
-          </li>
-          <li className="nav-item mb-2">
-            <button
-              className={`nav-link w-100 text-start d-flex align-items-center ${
-                activeModule === 'calificaciones' ? 'active bg-primary' : 'text-white'
-              }`}
-              onClick={() => setActiveModule('calificaciones')}
-            >
-              <FaGraduationCap className="me-2" />
-              Calificaciones
-            </button>
-          </li>
-        </ul>
-        
-        <hr className="my-2" />
-        
-        <button 
-          className="btn btn-outline-light mt-auto d-flex align-items-center justify-content-center" 
-          onClick={handleLogout}
-        >
-          <FaSignOutAlt className="me-2" />
-          Cerrar sesión
-        </button>
-      </nav>
+  // Filtrar asignaciones del profesor
+  const misAsignaciones = Array.isArray(asignaciones)
+    ? asignaciones.filter(a => a.profesor_nombre === userInfo.nombre)
+    : [];
 
-      {/* Main content */}
-      <main className="flex-grow-1 p-4 bg-light">
-        {/* Notificaciones flotantes */}
-        {error && (
-          <div className="position-fixed top-0 end-0 m-4" style={{ zIndex: 1000 }}>
-            <div className="alert alert-danger alert-dismissible fade show shadow" role="alert">
-              <strong>Error!</strong> {error}
-              <button type="button" className="btn-close" onClick={() => setError('')}></button>
-            </div>
-          </div>
-        )}
-        
-        {success && (
-          <div className="position-fixed top-0 end-0 m-4" style={{ zIndex: 1000 }}>
-            <div className="alert alert-success alert-dismissible fade show shadow" role="alert">
-              <strong>Éxito!</strong> {success}
-              <button type="button" className="btn-close" onClick={() => setSuccess('')}></button>
-            </div>
-          </div>
-        )}
+  // Función para renderizar la página según el rol
+  const renderPageByRole = () => {
+    const roleLower = userInfo.rol?.toLowerCase();
+    
+    switch (roleLower) {
+      case 'admin':
+      case 'administrativo':
+        return (
+          <AdminDashboard
+            userInfo={userInfo}
+            activeModule={activeModule}
+            setActiveModule={setActiveModule}
+            onLogout={handleLogout}
+            loading={loading}
+            error={error}
+            success={success}
+            setError={setError}
+            setSuccess={setSuccess}
+            usuarios={usuarios}
+            clases={clases}
+            asistencias={asistencias}
+            asignaciones={asignaciones}
+            calificaciones={calificaciones}
+            token={token}
+            fetchUsuarios={fetchUsuarios}
+            fetchClases={fetchClases}
+            fetchAsistencias={fetchAsistencias}
+            fetchAsignaciones={fetchAsignaciones}
+            fetchCalificaciones={fetchCalificaciones}
+            showError={showError}
+            showSuccess={showSuccess}
+            estudiantes={estudiantes}
+            cursosConProfesor={cursosConProfesor}
+            fetchCursosConProfesorNuevo={fetchCursosConProfesorNuevo} // Agregamos esta línea
+          />
+        );
 
-        {/* Contenido del módulo activo */}
-        <div className="container-fluid py-3">
-          {loading && (
-            <div className="text-center my-4">
-              <div className="spinner-border text-primary" role="status">
-                <span className="visually-hidden">Cargando...</span>
-              </div>
+      case 'profesor':
+      case 'docente':
+        return (
+          <ProfesorPage
+            userInfo={userInfo}
+            activeModule={activeModule}
+            setActiveModule={setActiveModule}
+            onLogout={handleLogout}
+            token={token}
+            clases={clases}
+            asistencias={asistencias}
+            calificaciones={calificaciones}
+            asignaciones={misAsignaciones}
+            asignacionesDocente={asignacionesDocente}
+            loadingAsignacionesDocente={loadingAsignacionesDocente}
+            errorAsignacionesDocente={errorAsignacionesDocente}
+            fetchAsignacionesDocente={fetchAsignacionesDocente}
+            showError={showError}
+            showSuccess={showSuccess}
+            loading={loading}
+            error={error}
+            success={success}
+            setError={setError}
+            setSuccess={setSuccess}
+          />
+        );
+
+      case 'alumno':
+      case 'estudiante':
+        return (
+          <AlumnoPage
+            userInfo={userInfo}
+            activeModule={activeModule}
+            setActiveModule={setActiveModule}
+            onLogout={handleLogout}
+            token={token}
+            clases={clases}
+            asistencias={asistencias}
+            calificaciones={calificaciones}
+            asignaciones={asignaciones}
+            showError={showError}
+            showSuccess={showSuccess}
+            loading={loading}
+            error={error}
+            success={success}
+            setError={setError}
+            setSuccess={setSuccess}
+          />
+        );
+
+      default:
+        return (
+          <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+            <div className="alert alert-danger" role="alert">
+              <h4 className="alert-heading">Acceso Denegado</h4>
+              <p>El rol "{userInfo.rol}" no tiene permisos para acceder al sistema.</p>
+              <p className="mb-0">Roles válidos: Admin, Administrativo, Profesor, Docente, Alumno, Estudiante</p>
+              <hr />
+              <button className="btn btn-outline-danger" onClick={handleLogout}>
+                Cerrar Sesión
+              </button>
             </div>
-          )}
-          
-          {activeModule === 'usuarios' && (
-            <UsuariosList 
-              usuarios={usuarios} 
-              token={token} 
-              fetchUsuarios={fetchUsuarios} 
-              showError={showError} 
-              showSuccess={showSuccess} 
-            />
-          )}
-          
-          {activeModule === 'clases' && (
-            <ClasesList 
-              clases={clases} 
-              token={token} 
-              fetchClases={fetchClases} 
-              showError={showError} 
-              showSuccess={showSuccess} 
-            />
-          )}
-          
-          {activeModule === 'asistencias' && (
-            <AsistenciasList
-              asistencias={asistencias}
-              usuarios={usuarios}
-              clases={clases}
-              token={token}
-              fetchAsistencias={fetchAsistencias}
-              showError={showError}
-              showSuccess={showSuccess}
-            />
-          )}
-          
-          {activeModule === 'calificaciones' && (
-            <CalificacionesList
-              calificaciones={calificaciones}
-              usuarios={usuarios}
-              clases={clases}
-              token={token}
-              fetchCalificaciones={fetchCalificaciones}
-              showError={showError}
-              showSuccess={showSuccess}
-            />
-          )}
-        </div>
-      </main>
-    </div>
-  );
+          </div>
+        );
+    }
+  };
+
+  return renderPageByRole();
 }
 
 export default App;

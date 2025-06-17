@@ -10,9 +10,9 @@ app.use(express.json());
 const SECRET_KEY = 'tu_clave_super_secreta';
 
 const connection = mysql.createConnection({
-  host: 'localhost',
-  user: 'root',
-  password: '',
+  host: 'instenglish-auth.c50qcacwip4o.us-east-2.rds.amazonaws.com',
+  user: 'admin',
+  password: 'GgAnth17',
   database: 'instenglish_attendance',
   port: 3306,
 });
