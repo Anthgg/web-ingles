@@ -1,0 +1,38 @@
+.app-table {
+  border-radius: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.app-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.app-table th,
+.app-table td {
+  padding: 0.85rem 1rem;
+  text-align: left;
+}
+
+.app-table thead {
+  background: rgba(37, 99, 235, 0.05);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.app-table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.app-table tbody tr + tr {
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.app-table__empty {
+  text-align: center;
+  color: rgba(15, 23, 42, 0.55);
+  padding: 2.5rem 1rem;
+}

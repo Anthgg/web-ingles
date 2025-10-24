@@ -1,0 +1,26 @@
+{
+  "name": "@campus/base-middleware",
+  "version": "0.1.0",
+  "description": "Common Express middlewares for GoEnglish microservices (logging, errors, validation, RBAC)",
+  "main": "src/index.js",
+  "license": "MIT",
+  "type": "commonjs",
+  "keywords": [
+    "express",
+    "middleware",
+    "logging",
+    "validation",
+    "rbac",
+    "goenglish"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.14.1",
+    "pino": "^9.3.2",
+    "pino-http": "^10.1.0",
+    "zod": "^3.23.8"
+  }
+}

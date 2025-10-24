@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { FaEdit, FaTrash, FaPlus, FaSearch, FaFilter, FaUserGraduate, FaBookOpen, FaCalendarAlt, FaCheck, FaTimes, FaClipboardCheck, FaClock, FaEye, FaDownload } from 'react-icons/fa';
+import ConfirmDialog from './ui/ConfirmDialog';
+import { FaEdit, FaTrash, FaPlus, FaSearch, FaUserGraduate, FaBookOpen, FaCalendarAlt, FaCheck, FaTimes, FaClipboardCheck, FaClock, FaDownload } from 'react-icons/fa';
 
 const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencias, showError, showSuccess }) => {
   const [showModal, setShowModal] = useState(false);
@@ -13,8 +14,10 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
-  const [sortBy, setSortBy] = useState('fecha');
-  const [sortOrder, setSortOrder] = useState('desc');
+  const sortBy = 'fecha';
+  const sortOrder = 'desc';
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [asistenciaToDelete, setAsistenciaToDelete] = useState(null);
 
   // Convierte ISO string a formato local para input datetime-local
   const toLocalDateTime = (dateStr) => {
@@ -71,8 +74,6 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar esta asistencia?')) return;
-    
     try {
       const res = await fetch(`http://localhost:3003/asistencias/${id}`, {
         method: 'DELETE',
@@ -85,6 +86,18 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
       fetchAsistencias();
     } catch (err) {
       showError(err.message);
+    }
+  };
+
+  const handleDeleteClick = (asistencia) => {
+    setAsistenciaToDelete(asistencia);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = () => {
+    if (asistenciaToDelete) {
+      handleDelete(asistenciaToDelete.id);
+      setAsistenciaToDelete(null);
     }
   };
 
@@ -153,7 +166,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
 
   return (
     <>
-      <style jsx>{`
+  <style>{`
         .asistencias-container {
           background: var(--bg-primary, #ffffff);
           border-radius: 16px;
@@ -810,7 +823,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
               <p>Comienza agregando una nueva asistencia</p>
             </div>
           ) : (
-            filteredAsistencias.map((asistencia) => {
+            (Array.isArray(filteredAsistencias) ? filteredAsistencias : []).map((asistencia) => {
               const estadoConfig = getEstadoConfig(asistencia.estado);
               const IconComponent = estadoConfig.icon;
               
@@ -849,7 +862,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                       </button>
                       <button
                         className="icon-btn delete"
-                        onClick={() => handleDelete(asistencia.id)}
+                        onClick={() => handleDeleteClick(asistencia)}
                         title="Eliminar"
                       >
                         <FaTrash size={14} />
@@ -888,7 +901,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                     <select
                       className="form-control"
                       name="estudiante_id"
-                      value={formData.estudiante_id}
+                      value={formData.estudiante_id ?? ''}
                       onChange={handleInputChange}
                       required
                     >
@@ -909,7 +922,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                     <select
                       className="form-control"
                       name="materia_id"
-                      value={formData.materia_id}
+                      value={formData.materia_id ?? ''}
                       onChange={handleInputChange}
                       required
                     >
@@ -930,7 +943,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                     <select
                       className="form-control"
                       name="estado"
-                      value={formData.estado}
+                      value={formData.estado ?? ''}
                       onChange={handleInputChange}
                       required
                     >
@@ -950,7 +963,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                       type="datetime-local"
                       className="form-control"
                       name="fecha"
-                      value={formData.fecha}
+                      value={formData.fecha ?? ''}
                       onChange={handleInputChange}
                     />
                   </div>
@@ -984,6 +997,21 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
             </div>
           </div>
         )}
+
+        {/* Confirm Delete Dialog */}
+        <ConfirmDialog
+          isOpen={showDeleteDialog}
+          onClose={() => {
+            setShowDeleteDialog(false);
+            setAsistenciaToDelete(null);
+          }}
+          onConfirm={confirmDelete}
+          title="¿Eliminar asistencia?"
+          message={`¿Estás seguro de que deseas eliminar esta asistencia? Esta acción no se puede deshacer.`}
+          confirmText="Sí, eliminar"
+          cancelText="Cancelar"
+          type="danger"
+        />
       </div>
     </>
   );

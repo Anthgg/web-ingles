@@ -1,123 +1,250 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
-import { FaUserPlus, FaUserGraduate, FaSave, FaTimes, FaUsers, FaChalkboardTeacher, FaCalendarAlt, FaClock, FaSearch, FaFilter, FaStar, FaGraduationCap, FaBookOpen } from 'react-icons/fa';
+import { FaUserPlus, FaUserGraduate, FaSave, FaTimes, FaUsers, FaChalkboardTeacher, FaCalendarAlt, FaClock, FaSearch, FaStar, FaGraduationCap, FaBookOpen, FaSchool } from 'react-icons/fa';
 
-const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuccess }) => {
+const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
   // Estados
   const [estudiantes, setEstudiantes] = useState([]);
   const [cursosProfesores, setCursosProfesores] = useState([]);
-  const [capacidadCursos, setCapacidadCursos] = useState({});
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [formData, setFormData] = useState({
     estudianteId: '',
-    profesorId: '',
-    asignacionId: ''
+    asignacionId: '',
+  });
+  const [filters, setFilters] = useState({
+    nivel: '',
+    grado: '',
+    seccion: '',
   });
   const [showForm, setShowForm] = useState(false);
   const [cursoSeleccionado, setCursoSeleccionado] = useState(null);
-  const [animacionActiva, setAnimacionActiva] = useState(false);
+  const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3007';
 
-  // Obtener estudiantes del listado de usuarios
+  const normalizeText = useCallback((value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : null;
+    }
+    return value;
+  }, []);
+
+  const normalizeGrade = useCallback((value) => {
+    if (value === null || value === undefined) return null;
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric)) return numeric;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : null;
+    }
+    return value;
+  }, []);
+
+  const resolveEstudianteId = useCallback((estudiante) => {
+    if (!estudiante) return null;
+    return (
+      estudiante._id ??
+      estudiante.id ??
+      estudiante.ID ??
+      estudiante.usuario_id ??
+      estudiante.userId ??
+      null
+    );
+  }, []);
+
+  const resolveCursoId = useCallback((curso) => {
+    if (!curso) return null;
+    return (
+      curso.id ??
+      curso.asignacion_id ??
+      curso.asignacionId ??
+      curso.course_assignment_id ??
+      curso.cursoAsignacionId ??
+      null
+    );
+  }, []);
+
+  const formatLevelLabel = (level) => {
+    if (level === null || level === undefined) return 'Nivel sin definir';
+    if (typeof level === 'string') {
+      const trimmed = level.trim();
+      if (!trimmed) return 'Nivel sin definir';
+      return trimmed.toLowerCase().startsWith('nivel') ? trimmed : `Nivel ${trimmed}`;
+    }
+    return `Nivel ${level}`;
+  };
+
+  const formatGradeLabel = (grade) => {
+    if (grade === null || grade === undefined) return 'Grado sin definir';
+    if (typeof grade === 'string') {
+      const trimmed = grade.trim();
+      if (!trimmed) return 'Grado sin definir';
+      return trimmed.toLowerCase().startsWith('grado') ? trimmed : `Grado ${trimmed}`;
+    }
+    if (Number.isNaN(grade)) return 'Grado sin definir';
+    return `Grado ${grade}`;
+  };
+
+  const formatSectionLabel = (section) => {
+    if (section === null || section === undefined) return 'Sección sin definir';
+    if (typeof section === 'string') {
+      const trimmed = section.trim();
+      if (!trimmed) return 'Sección sin definir';
+      return trimmed.toLowerCase().startsWith('sección') || trimmed.toLowerCase().startsWith('seccion')
+        ? trimmed
+        : `Sección ${trimmed}`;
+    }
+    return `Sección ${section}`;
+  };
+
+  const buildUbicacionResumen = (curso) => [
+    formatLevelLabel(curso?.level ?? null),
+    formatGradeLabel(curso?.grade_number ?? null),
+    formatSectionLabel(curso?.section ?? null),
+  ].join(' • ');
+
+  const asignacionSeleccionada = useMemo(() => {
+    if (!formData.asignacionId) return null;
+    return (
+      cursosProfesores.find((cp) => {
+        const resolvedId = resolveCursoId(cp);
+        return resolvedId !== null && String(resolvedId) === String(formData.asignacionId);
+      }) || null
+    );
+  }, [formData.asignacionId, cursosProfesores, resolveCursoId]);
+
+  const aulaBloqueada = useMemo(() => {
+    if (!asignacionSeleccionada) return false;
+    const nivel = normalizeText(asignacionSeleccionada.level);
+    const grado = normalizeGrade(asignacionSeleccionada.grade_number);
+    const seccion = normalizeText(asignacionSeleccionada.section);
+    return Boolean(nivel && grado !== null && seccion);
+  }, [asignacionSeleccionada, normalizeGrade, normalizeText]);
+
+  // Obtener estudiantes del listado de usuarios y asignar ciclo 1 automáticamente si es nuevo
   useEffect(() => {
-    if (usuarios && Array.isArray(usuarios)) {
-      const estudiantesFiltrados = usuarios.filter(u => u.rol === 'estudiante');
+    if (Array.isArray(usuarios)) {
+      const estudiantesFiltrados = usuarios.filter((usuario) => usuario.rol === 'estudiante');
       setEstudiantes(estudiantesFiltrados);
     }
   }, [usuarios]);
 
   // Efecto para la animación
-  useEffect(() => {
-    setAnimacionActiva(true);
-    const timer = setTimeout(() => {
-      setAnimacionActiva(false);
-    }, 3000);
-    
-    return () => clearTimeout(timer);
-  }, []);
-
   // Cargar cursos con profesores
-  const fetchCursosProfesores = async () => {
+  const fetchCursosProfesores = useCallback(async () => {
     try {
       const response = await axios.get(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:3007'}/cursos-con-profesor`,
+        `${apiBaseUrl}/cursos-con-profesor`,
         {
           headers: { Authorization: `Bearer ${token}` }
         }
       );
-      setCursosProfesores(response.data);
+      const data = Array.isArray(response.data)
+        ? response.data.map((item) => {
+            const inscritosParsed = Number(item.inscritos);
+            const maxParsed = item.max_alumnos != null ? Number(item.max_alumnos) : null;
+            return {
+              ...item,
+              level: normalizeText(item.level),
+              section: normalizeText(item.section),
+              inscritos: Number.isNaN(inscritosParsed) ? 0 : inscritosParsed,
+              max_alumnos: Number.isNaN(maxParsed) ? null : maxParsed,
+              grade_number: normalizeGrade(item.grade_number),
+            };
+          })
+        : [];
+      setCursosProfesores(data);
     } catch (error) {
       console.error('Error cargando cursos con profesores:', error);
       showError('Error al cargar los cursos disponibles');
     }
-  };
+  }, [apiBaseUrl, token, showError, normalizeGrade, normalizeText]);
 
   useEffect(() => {
     fetchCursosProfesores();
-  }, [token]);
+  }, [token, fetchCursosProfesores]);
+
+  // Eliminado: la carga de ciclos ahora se hace en el dashboard y se pasa por prop
 
   // Manejar cambios en el formulario
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    if (name === 'estudianteId') {
+      setFormData((prev) => ({ ...prev, estudianteId: value }));
+    }
   };
 
   // Manejar la creación de una nueva asignación
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    
-    const cursoSeleccionado = cursosProfesores.find(cp => cp.id.toString() === formData.asignacionId);
-    const capacidadActual = capacidadCursos[formData.asignacionId] || 0;
-    
-    if (cursoSeleccionado && capacidadActual >= cursoSeleccionado.max_alumnos) {
-      showError('Este curso ya ha alcanzado su capacidad máxima de alumnos');
+    const alumno = estudiantes.find((est) => {
+      const resolvedId = resolveEstudianteId(est);
+      return resolvedId !== null && String(resolvedId) === String(formData.estudianteId);
+    });
+    const curso = cursosProfesores.find((cp) => {
+      const resolvedId = resolveCursoId(cp);
+      return resolvedId !== null && String(resolvedId) === String(formData.asignacionId);
+    });
+
+    if (!alumno || !curso) {
+      showError('Selecciona un estudiante y un curso válidos');
       setLoading(false);
       return;
     }
-    
     try {
-      const estudianteSeleccionado = estudiantes.find(
-        e => String(e._id) === String(formData.estudianteId)
-      );
-      
-      const cursoSeleccionado = cursosProfesores.find(cp => cp.id.toString() === formData.asignacionId);
-
-      const payload = {
-        estudianteNombre: formData.estudianteId,
-        profesorNombre: cursoSeleccionado ? cursoSeleccionado.profesor : 'Profesor no encontrado',
-        cursoNombre: cursoSeleccionado ? cursoSeleccionado.nombre : 'Curso no encontrado',
-        capacidad: cursoSeleccionado ? cursoSeleccionado.max_alumnos : 30,
-        hora_inicio: cursoSeleccionado ? cursoSeleccionado.hora_inicio : '08:00',
-        hora_fin: cursoSeleccionado ? cursoSeleccionado.hora_fin : '09:00',
-        fecha_inicio: cursoSeleccionado ? cursoSeleccionado.fecha_inicio : '2023-06-01',
-        aula: 'Aula 101',
-      };
-
       await axios.post(
-        'http://localhost:3009/api/asignaciones-curso',
-        payload
+        `${apiBaseUrl}/asignaciones/${curso.id}/estudiantes`,
+  { estudianteId: resolveEstudianteId(alumno) },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
-
-      showSuccess('Estudiante asignado correctamente');
-
-      setCapacidadCursos((prevCapacidad) => ({
-        ...prevCapacidad,
-        [formData.asignacionId]: (prevCapacidad[formData.asignacionId] || 0) + 1
-      }));
-
-      setFormData({ estudianteId: '', profesorId: '', asignacionId: '' });
+      showSuccess('Estudiante vinculado correctamente a la asignación');
+      setFormData({ estudianteId: '', asignacionId: '' });
       setShowForm(false);
-      setAnimacionActiva(true);
-      setTimeout(() => setAnimacionActiva(false), 3000);
+      await fetchCursosProfesores();
     } catch (error) {
-      showError(error.response?.data?.message || 'Error al asignar estudiante');
-      console.error('Error en asignación:', error);
+      const mensaje = error.response?.data?.error || error.response?.data?.message || 'Error al asignar estudiante';
+      showError(mensaje);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    const normalizedValue = typeof value === 'string' ? value.trim() : value;
+    setFilters((prev) => {
+      const next = { ...prev, [name]: normalizedValue };
+      if (name === 'nivel') {
+        next.grado = '';
+        next.seccion = '';
+      }
+      if (name === 'grado') {
+        next.seccion = '';
+      }
+      return next;
+    });
+    setFormData((prev) => ({ ...prev, asignacionId: '' }));
+  };
+
+  const handleAsignacionChange = (e) => {
+    const value = e.target.value;
+    const trimmedValue = typeof value === 'string' ? value.trim() : value;
+    const selectedCurso = cursosProfesores.find((cp) => {
+      const resolvedId = resolveCursoId(cp);
+      return resolvedId !== null && String(resolvedId) === String(trimmedValue);
+    });
+    setFormData((prev) => ({ ...prev, asignacionId: trimmedValue }));
+    if (selectedCurso) {
+      setFilters({
+        nivel: normalizeText(selectedCurso.level) || '',
+        grado: selectedCurso.grade_number != null ? String(selectedCurso.grade_number).trim() : '',
+        seccion: normalizeText(selectedCurso.section) || '',
+      });
     }
   };
 
@@ -126,24 +253,105 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
     setCursoSeleccionado(curso);
   };
 
-  // Filtrar cursos
-  const filteredCursos = cursosProfesores.filter(curso => {
-    const matchesSearch = curso.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         curso.profesor.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const capacidadActual = capacidadCursos[curso.id] || 0;
-    const porcentaje = (capacidadActual / curso.max_alumnos) * 100;
-    
-    if (filterStatus === 'disponible') return porcentaje < 100 && matchesSearch;
-    if (filterStatus === 'lleno') return porcentaje >= 100 && matchesSearch;
-    if (filterStatus === 'casi-lleno') return porcentaje >= 80 && porcentaje < 100 && matchesSearch;
-    
-    return matchesSearch;
+  const nivelesDisponibles = Array.from(new Set(cursosProfesores.map((c) => c.level).filter(Boolean))).sort();
+  const gradosDisponibles = Array.from(
+    new Set(
+      cursosProfesores
+        .filter((c) => !filters.nivel || c.level === filters.nivel)
+        .map((c) => c.grade_number)
+        .filter((grado) => {
+          if (grado === null || grado === undefined) return false;
+          if (typeof grado === 'string') return grado.trim().length > 0;
+          return !Number.isNaN(grado);
+        })
+    )
+  ).sort((a, b) => {
+    const numA = Number(a);
+    const numB = Number(b);
+    const aIsNum = !Number.isNaN(numA);
+    const bIsNum = !Number.isNaN(numB);
+    if (aIsNum && bIsNum) return numA - numB;
+    if (aIsNum) return -1;
+    if (bIsNum) return 1;
+    return String(a).localeCompare(String(b), 'es', { sensitivity: 'base', numeric: true });
   });
+  const seccionesDisponibles = Array.from(
+    new Set(
+      cursosProfesores
+        .filter((c) => (!filters.nivel || c.level === filters.nivel) && (!filters.grado || String(c.grade_number) === String(filters.grado)))
+        .map((c) => c.section)
+        .filter((seccion) => {
+          if (seccion === null || seccion === undefined) return false;
+          if (typeof seccion === 'string') return seccion.trim().length > 0;
+          return true;
+        })
+    )
+  ).sort();
+
+  const searchQuery = searchTerm.trim().toLowerCase();
+
+  const filteredCursos = cursosProfesores.filter((curso) => {
+    if (filters.nivel && curso.level !== filters.nivel) return false;
+    if (filters.grado && String(curso.grade_number) !== String(filters.grado)) return false;
+    if (filters.seccion && curso.section !== filters.seccion) return false;
+
+    const textosBusqueda = [
+      curso.nombre,
+      curso.profesor,
+      curso.level,
+      curso.section,
+      curso.grade_number != null ? `grado ${curso.grade_number}` : '',
+    ];
+    const matchesSearch = searchQuery.length === 0 || textosBusqueda.some((value) =>
+      value && value.toString().toLowerCase().includes(searchQuery)
+    );
+    if (!matchesSearch) return false;
+
+    const inscritos = Number(curso.inscritos || 0);
+    const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
+    const tieneCupoDefinido = maxAlumnos !== null && maxAlumnos > 0;
+    const porcentaje = tieneCupoDefinido ? (inscritos / maxAlumnos) * 100 : 0;
+
+    if (filterStatus === 'disponible') {
+      return !tieneCupoDefinido || porcentaje < 100;
+    }
+    if (filterStatus === 'lleno') {
+      return tieneCupoDefinido && porcentaje >= 100;
+    }
+    if (filterStatus === 'casi-lleno') {
+      return tieneCupoDefinido && porcentaje >= 80 && porcentaje < 100;
+    }
+
+    return true;
+  });
+
+  const totalCursos = cursosProfesores.length;
+  const cursosDisponibles = cursosProfesores.filter((curso) => {
+    const inscritos = Number(curso.inscritos || 0);
+    const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
+    if (maxAlumnos === null || maxAlumnos <= 0) return true;
+    return inscritos < maxAlumnos;
+  }).length;
+  const cursosCompletos = cursosProfesores.filter((curso) => {
+    const inscritos = Number(curso.inscritos || 0);
+    const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
+    if (maxAlumnos === null || maxAlumnos <= 0) return false;
+    return inscritos >= maxAlumnos;
+  }).length;
+  const cursoSeleccionadoDetalle = cursoSeleccionado
+    ? {
+        inscritos: Number(cursoSeleccionado.inscritos || 0),
+        max: cursoSeleccionado.max_alumnos != null ? Number(cursoSeleccionado.max_alumnos) : null,
+      }
+    : null;
+  const cursoSeleccionadoTieneCupo = cursoSeleccionadoDetalle ? cursoSeleccionadoDetalle.max !== null && cursoSeleccionadoDetalle.max > 0 : false;
+  const cursoSeleccionadoPorcentaje = cursoSeleccionadoDetalle && cursoSeleccionadoTieneCupo
+    ? Math.min((cursoSeleccionadoDetalle.inscritos / cursoSeleccionadoDetalle.max) * 100, 100)
+    : 0;
 
   return (
     <>
-      <style jsx>{`
+  <style>{`
         .modern-gradient {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
@@ -487,11 +695,17 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                               placeholder=" "
                             >
                               <option value="">Seleccionar estudiante...</option>
-                              {estudiantes.map(estudiante => (
-                                <option key={estudiante._id} value={estudiante.nombre}>
-                                  {estudiante.nombre}
-                                </option>
-                              ))}
+                              {estudiantes.map((estudiante) => {
+                                const resolvedId = resolveEstudianteId(estudiante);
+                                if (resolvedId === null || resolvedId === undefined) {
+                                  return null;
+                                }
+                                return (
+                                  <option key={resolvedId} value={resolvedId}>
+                                    {estudiante.nombre}
+                                  </option>
+                                );
+                              })}
                             </select>
                             <label className="label-text">
                               <FaUserGraduate className="me-2" />
@@ -507,29 +721,29 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                               name="asignacionId"
                               className="floating-input"
                               value={formData.asignacionId}
-                              onChange={(e) => {
-                                const selectedCursoProfesor = cursosProfesores.find(cp => cp.id.toString() === e.target.value);
-                                setFormData({
-                                  ...formData,
-                                  asignacionId: e.target.value,
-                                  profesorId: selectedCursoProfesor ? profesores.find(p => p.nombre === selectedCursoProfesor.profesor)?._id : ''
-                                });
-                              }}
+                              onChange={handleAsignacionChange}
                               required
                               placeholder=" "
                             >
                               <option value="">Seleccionar curso...</option>
-                              {cursosProfesores.map(cp => {
-                                const capacidadActual = capacidadCursos[cp.id] || 0;
-                                const estaLleno = capacidadActual >= cp.max_alumnos;
-                                
+                              {(Array.isArray(filteredCursos) ? filteredCursos : []).map((cp) => {
+                                const resolvedId = resolveCursoId(cp);
+                                if (resolvedId === null || resolvedId === undefined) {
+                                  return null;
+                                }
+                                const inscritos = Number(cp.inscritos || 0);
+                                const maxAlumnos = cp.max_alumnos != null ? Number(cp.max_alumnos) : null;
+                                const estaLleno = maxAlumnos !== null && inscritos >= maxAlumnos;
+                                const cupoLabel = maxAlumnos !== null
+                                  ? `${inscritos}/${maxAlumnos}`
+                                  : `${inscritos} inscritos`;
                                 return (
                                   <option 
-                                    key={cp.id} 
-                                    value={cp.id}
+                                    key={resolvedId} 
+                                    value={resolvedId}
                                     disabled={estaLleno}
                                   >
-                                    {cp.nombre} - {cp.profesor} ({capacidadActual}/{cp.max_alumnos})
+                                    {cp.nombre} • {buildUbicacionResumen(cp)} — {cp.profesor} ({cupoLabel})
                                   </option>
                                 );
                               })}
@@ -537,6 +751,79 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                             <label className="label-text">
                               <FaChalkboardTeacher className="me-2" />
                               Curso y Profesor
+                            </label>
+                          </div>
+                        </div>
+                        {aulaBloqueada && asignacionSeleccionada && (
+                          <div className="col-12">
+                            <div className="alert alert-info rounded-4 py-3 px-4 mb-0">
+                              <strong>Aula definida:</strong> {buildUbicacionResumen(asignacionSeleccionada)}. Para cambiar estos datos selecciona otra asignación.
+                            </div>
+                          </div>
+                        )}
+                        <div className="col-md-4">
+                          <div className="floating-label">
+                            <select
+                              id="nivel"
+                              name="nivel"
+                              className="floating-input"
+                              value={filters.nivel}
+                              onChange={handleFilterChange}
+                              disabled={aulaBloqueada}
+                              placeholder=" "
+                            >
+                              <option value="">Todos los niveles...</option>
+                              {nivelesDisponibles.map((nivel) => (
+                                <option key={nivel} value={nivel}>{nivel}</option>
+                              ))}
+                            </select>
+                            <label className="label-text">
+                              <FaSchool className="me-2" />
+                              Nivel
+                            </label>
+                          </div>
+                        </div>
+                        <div className="col-md-4">
+                          <div className="floating-label">
+                            <select
+                              id="grado"
+                              name="grado"
+                              className="floating-input"
+                              value={filters.grado}
+                              onChange={handleFilterChange}
+                              disabled={aulaBloqueada}
+                              placeholder=" "
+                            >
+                              <option value="">Todos los grados...</option>
+                              {gradosDisponibles.map((grado) => (
+                                <option key={grado} value={grado}>{`Grado ${grado}`}</option>
+                              ))}
+                            </select>
+                            <label className="label-text">
+                              <FaGraduationCap className="me-2" />
+                              Grado
+                            </label>
+                          </div>
+                        </div>
+                        <div className="col-md-4">
+                          <div className="floating-label">
+                            <select
+                              id="seccion"
+                              name="seccion"
+                              className="floating-input"
+                              value={filters.seccion}
+                              onChange={handleFilterChange}
+                              disabled={aulaBloqueada}
+                              placeholder=" "
+                            >
+                              <option value="">Todas las secciones...</option>
+                              {seccionesDisponibles.map((seccion) => (
+                                <option key={seccion} value={seccion}>{`Sección ${seccion}`}</option>
+                              ))}
+                            </select>
+                            <label className="label-text">
+                              <FaUsers className="me-2" />
+                              Sección
                             </label>
                           </div>
                         </div>
@@ -617,8 +904,17 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
               {/* Grid de cursos */}
               <div className="row g-4">
                 {filteredCursos.map((curso, index) => {
-                  const capacidadActual = capacidadCursos[curso.id] || 0;
-                  const porcentajeOcupacion = (capacidadActual / curso.max_alumnos) * 100;
+                  const inscritos = Number(curso.inscritos || 0);
+                  const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
+                  const tieneCupoDefinido = maxAlumnos !== null && maxAlumnos > 0;
+                  const porcentajeOcupacion = tieneCupoDefinido ? Math.min((inscritos / maxAlumnos) * 100, 100) : 0;
+                  const disponibilidadLabel = !tieneCupoDefinido
+                    ? 'Cupo abierto'
+                    : inscritos >= maxAlumnos
+                      ? 'Lleno'
+                      : inscritos >= 0.8 * maxAlumnos
+                        ? 'Casi lleno'
+                        : 'Disponible';
                   
                   return (
                     <div key={curso.id} className="col-lg-6 animate-slide-up" style={{animationDelay: `${index * 0.1}s`}}>
@@ -633,6 +929,10 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                               <FaChalkboardTeacher className="me-2" />
                               {curso.profesor}
                             </p>
+                            <p className="text-muted small mb-1">
+                              <FaSchool className="me-2" />
+                              {buildUbicacionResumen(curso)}
+                            </p>
                             <p className="text-muted small mb-0">
                               <FaClock className="me-2" />
                               {curso.dia_semana} • {curso.hora_inicio} - {curso.hora_fin}
@@ -640,24 +940,31 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                           </div>
                           
                           <div className="progress-ring" style={{'--progress': `${porcentajeOcupacion}%`}}>
-                            <span className="progress-text">{Math.round(porcentajeOcupacion)}%</span>
+                            <span className="progress-text">
+                              {tieneCupoDefinido ? `${Math.round(porcentajeOcupacion)}%` : 'Sin limite'}
+                            </span>
                           </div>
                         </div>
                         
                         <div className="d-flex justify-content-between align-items-center">
                           <div>
                             <span className="fw-bold" style={{color: '#667eea'}}>
-                              {capacidadActual}/{curso.max_alumnos}
+                              {inscritos}
+                              {maxAlumnos != null ? `/${maxAlumnos}` : ''}
                             </span>
                             <span className="text-muted ms-2">estudiantes</span>
                           </div>
                           
                           <span className={`badge rounded-pill px-3 py-2 ${
-                            porcentajeOcupacion >= 100 ? 'bg-danger' : 
-                            porcentajeOcupacion >= 80 ? 'bg-warning text-dark' : 'bg-success'
+                            !tieneCupoDefinido
+                              ? 'bg-primary'
+                              : porcentajeOcupacion >= 100
+                                ? 'bg-danger'
+                                : porcentajeOcupacion >= 80
+                                  ? 'bg-warning text-dark'
+                                  : 'bg-success'
                           }`}>
-                            {porcentajeOcupacion >= 100 ? 'Lleno' : 
-                             porcentajeOcupacion >= 80 ? 'Casi lleno' : 'Disponible'}
+                            {disponibilidadLabel}
                           </span>
                         </div>
                       </div>
@@ -688,7 +995,7 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                   </h5>
                   <div className="row g-3 text-center">
                     <div className="col-6">
-                      <div className="h3 fw-bold mb-1">{cursosProfesores.length}</div>
+                      <div className="h3 fw-bold mb-1">{totalCursos}</div>
                       <div className="small opacity-75">Cursos Totales</div>
                     </div>
                     <div className="col-6">
@@ -696,15 +1003,11 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                       <div className="small opacity-75">Estudiantes</div>
                     </div>
                     <div className="col-6">
-                      <div className="h3 fw-bold mb-1">
-                        {cursosProfesores.filter(c => (capacidadCursos[c.id] || 0) < c.max_alumnos).length}
-                      </div>
+                      <div className="h3 fw-bold mb-1">{cursosDisponibles}</div>
                       <div className="small opacity-75">Disponibles</div>
                     </div>
                     <div className="col-6">
-                      <div className="h3 fw-bold mb-1">
-                        {cursosProfesores.filter(c => (capacidadCursos[c.id] || 0) >= c.max_alumnos).length}
-                      </div>
+                      <div className="h3 fw-bold mb-1">{cursosCompletos}</div>
                       <div className="small opacity-75">Completos</div>
                     </div>
                   </div>
@@ -718,9 +1021,11 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                   </h6>
                   
                   <div className="space-y-3">
-                    {cursosProfesores.slice(0, 5).map((curso, index) => {
-                      const capacidadActual = capacidadCursos[curso.id] || 0;
-                      const porcentaje = (capacidadActual / curso.max_alumnos) * 100;
+                    {(Array.isArray(cursosProfesores) ? cursosProfesores : []).slice(0, 5).map((curso, index) => {
+                      const inscritos = Number(curso.inscritos || 0);
+                      const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
+                      const tieneCupoDefinido = maxAlumnos !== null && maxAlumnos > 0;
+                      const porcentaje = tieneCupoDefinido ? Math.min((inscritos / maxAlumnos) * 100, 100) : 0;
                       
                       return (
                         <div 
@@ -737,19 +1042,19 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
                               style={{
                                 width: '40px', 
                                 height: '40px', 
-                                background: `linear-gradient(135deg, ${porcentaje >= 100 ? '#dc3545' : porcentaje >= 80 ? '#ffc107' : '#28a745'} 0%, ${porcentaje >= 100 ? '#c82333' : porcentaje >= 80 ? '#e0a800' : '#218838'} 100%)`,
+                                background: `linear-gradient(135deg, ${!tieneCupoDefinido ? '#4c51bf' : porcentaje >= 100 ? '#dc3545' : porcentaje >= 80 ? '#ffc107' : '#28a745'} 0%, ${!tieneCupoDefinido ? '#5a67d8' : porcentaje >= 100 ? '#c82333' : porcentaje >= 80 ? '#e0a800' : '#218838'} 100%)`,
                                 color: 'white',
                                 fontSize: '12px',
                                 fontWeight: 'bold'
                               }}
                             >
-                              {Math.round(porcentaje)}%
+                              {tieneCupoDefinido ? `${Math.round(porcentaje)}%` : 'Sin limite'}
                             </div>
                           </div>
                           <div className="flex-grow-1">
                             <div className="fw-medium small mb-1">{curso.nombre}</div>
                             <div className="text-muted" style={{fontSize: '0.8rem'}}>
-                              {capacidadActual}/{curso.max_alumnos} estudiantes
+                              {inscritos}{tieneCupoDefinido ? `/${maxAlumnos}` : ''} estudiantes
                             </div>
                           </div>
                         </div>
@@ -761,109 +1066,139 @@ const AsignacionEstudiantes = ({ usuarios, profesores, token, showError, showSuc
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Modal moderno */}
-      {cursoSeleccionado && (
-        <div className="modal fade show d-block modal-modern" tabIndex="-1">
-          <div className="modal-dialog modal-dialog-centered modal-lg">
-            <div className="modal-content modal-content-modern animate-fade-scale">
-              <div className="modal-header border-0 pb-2" style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}}>
-                <div className="text-white">
-                  <h5 className="modal-title fw-bold mb-1">
-                    <FaBookOpen className="me-2" />
-                    {cursoSeleccionado.nombre}
-                  </h5>
-                  <p className="mb-0 opacity-75">{cursoSeleccionado.profesor}</p>
-                </div>
-                <button 
-                  type="button" 
-                  className="btn-close btn-close-white" 
-                  onClick={() => setCursoSeleccionado(null)}
-                ></button>
-              </div>
-              
-              <div className="modal-body p-4">
-                <div className="row g-4">
-                  <div className="col-md-8">
-                    <div className="space-y-4">
-                      <div className="d-flex align-items-center p-3 rounded-3" style={{background: '#f8f9fa'}}>
-                        <div className="bg-primary bg-opacity-10 rounded-circle p-3 me-3">
-                          <FaCalendarAlt className="text-primary" />
-                        </div>
-                        <div>
-                          <h6 className="mb-1 fw-bold">Horario</h6>
-                          <p className="mb-0 text-muted">{cursoSeleccionado.dia_semana}</p>
-                          <p className="mb-0 small">{cursoSeleccionado.hora_inicio} - {cursoSeleccionado.hora_fin}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="d-flex align-items-center p-3 rounded-3" style={{background: '#f8f9fa'}}>
-                        <div className="bg-success bg-opacity-10 rounded-circle p-3 me-3">
-                          <FaUsers className="text-success" />
-                        </div>
-                        <div>
-                          <h6 className="mb-1 fw-bold">Capacidad</h6>
-                          <p className="mb-0">
-                            <span className="fw-bold text-primary">
-                              {(capacidadCursos[cursoSeleccionado.id] || 0)}
-                            </span>
-                            <span className="text-muted"> de {cursoSeleccionado.max_alumnos} estudiantes</span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+        {/* Modal moderno */}
+        {cursoSeleccionado && (
+          <div className="modal fade show d-block modal-modern" tabIndex="-1">
+            <div className="modal-dialog modal-dialog-centered modal-lg">
+              <div className="modal-content modal-content-modern animate-fade-scale">
+                <div className="modal-header border-0 pb-2" style={{background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'}}>
+                  <div className="text-white">
+                    <h5 className="modal-title fw-bold mb-1">
+                      <FaBookOpen className="me-2" />
+                      {cursoSeleccionado.nombre}
+                    </h5>
+                    <p className="mb-0 opacity-75">{cursoSeleccionado.profesor}</p>
                   </div>
-                  
-                  <div className="col-md-4 text-center">
-                    <div 
-                      className="progress-ring mx-auto mb-3" 
-                      style={{
-                        width: '100px', 
-                        height: '100px',
-                        '--progress': `${((capacidadCursos[cursoSeleccionado.id] || 0) / cursoSeleccionado.max_alumnos) * 100}%`
-                      }}
-                    >
-                      <div className="progress-text" style={{fontSize: '16px'}}>
-                        {Math.round(((capacidadCursos[cursoSeleccionado.id] || 0) / cursoSeleccionado.max_alumnos) * 100)}%
-                      </div>
-                    </div>
-                    <p className="text-muted small">Ocupación actual</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="modal-footer border-0 pt-0">
-                <button 
-                  type="button" 
-                  className="btn btn-outline-secondary rounded-pill px-4" 
-                  onClick={() => setCursoSeleccionado(null)}
-                >
-                  Cerrar
-                </button>
-                {(capacidadCursos[cursoSeleccionado.id] || 0) < cursoSeleccionado.max_alumnos && (
                   <button 
                     type="button" 
-                    className="modern-btn" 
-                    onClick={() => {
-                      setFormData({
-                        ...formData,
-                        asignacionId: cursoSeleccionado.id.toString(),
-                        profesorId: profesores.find(p => p.nombre === cursoSeleccionado.profesor)?._id || ''
-                      });
-                      setShowForm(true);
-                      setCursoSeleccionado(null);
-                    }}
+                    className="btn-close btn-close-white" 
+                    onClick={() => setCursoSeleccionado(null)}
+                  ></button>
+                </div>
+                
+                <div className="modal-body p-4">
+                  <div className="row g-4">
+                    <div className="col-md-8">
+                      <div className="space-y-4">
+                        <div className="d-flex align-items-center p-3 rounded-3" style={{background: '#f8f9fa'}}>
+                          <div className="bg-primary bg-opacity-10 rounded-circle p-3 me-3">
+                            <FaCalendarAlt className="text-primary" />
+                          </div>
+                          <div>
+                            <h6 className="mb-1 fw-bold">Horario</h6>
+                            <p className="mb-0 text-muted">{cursoSeleccionado.dia_semana}</p>
+                            <p className="mb-0 small">{cursoSeleccionado.hora_inicio} - {cursoSeleccionado.hora_fin}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="d-flex align-items-center p-3 rounded-3" style={{background: '#f8f9fa'}}>
+                          <div className="bg-success bg-opacity-10 rounded-circle p-3 me-3">
+                            <FaUsers className="text-success" />
+                          </div>
+                          <div>
+                            <h6 className="mb-1 fw-bold">Capacidad</h6>
+                            <p className="mb-0">
+                              <span className="fw-bold text-primary">
+                                {cursoSeleccionadoDetalle?.inscritos ?? 0}
+                              </span>
+                              {cursoSeleccionadoTieneCupo ? (
+                                <span className="text-muted"> de {cursoSeleccionadoDetalle?.max} estudiantes</span>
+                              ) : (
+                                <span className="text-muted"> inscritos actualmente</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="col-md-4 text-center">
+                      <div 
+                        className="progress-ring mx-auto mb-3" 
+                        style={{
+                          width: '100px', 
+                          height: '100px',
+                          '--progress': `${cursoSeleccionadoPorcentaje}%`
+                        }}
+                      >
+                        <div className="progress-text" style={{fontSize: '16px'}}>
+                          {cursoSeleccionadoTieneCupo ? `${Math.round(cursoSeleccionadoPorcentaje)}%` : 'Sin limite'}
+                        </div>
+                      </div>
+                      <p className="text-muted small">Ocupación actual</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="modal-footer border-0 pt-0">
+                  <button 
+                    type="button" 
+                    className="btn btn-outline-secondary rounded-pill px-4" 
+                    onClick={() => setCursoSeleccionado(null)}
                   >
-                    <FaUserPlus className="me-2" />
-                    Asignar Estudiante
+                    Cerrar
                   </button>
-                )}
+                  {(!cursoSeleccionadoTieneCupo || (cursoSeleccionadoDetalle?.inscritos ?? 0) < (cursoSeleccionadoDetalle?.max ?? 0)) && (
+                    <button 
+                      type="button" 
+                      className="modern-btn" 
+                      onClick={() => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          asignacionId: cursoSeleccionado.id.toString()
+                        }));
+                        setShowForm(true);
+                        setCursoSeleccionado(null);
+                      }}
+                    >
+                      <FaUserPlus className="me-2" />
+                      Asignar Estudiante
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
+        )}
+
+        {/* Nueva sección: Estudiantes y Ciclo Asignado */}
+        <div className="neo-card p-4 mb-4 animate-slide-up">
+          <h5 className="fw-bold mb-3" style={{color: '#2d3748'}}>
+            <FaUserGraduate className="me-2" /> Estudiantes y Ciclo Asignado
+          </h5>
+          <div className="table-responsive">
+            <table className="table table-bordered table-hover align-middle">
+              <thead className="table-light">
+                <tr>
+                  <th>Nombre</th>
+                  <th>Email</th>
+                  <th>Ciclo/Semestre</th>
+                </tr>
+              </thead>
+              <tbody>
+                {estudiantes.map(est => (
+                  <tr key={est._id}>
+                    <td>{est.nombre}</td>
+                    <td>{est.email}</td>
+                    <td>{est.ciclo_nombre || 'No asignado'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      )}
+      </div>
     </>
   );
 };

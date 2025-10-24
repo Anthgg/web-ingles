@@ -1,280 +1,324 @@
-import React, { useState } from 'react';
-import { FaEnvelope, FaLock, FaUserGraduate, FaChalkboardTeacher } from 'react-icons/fa';
+import React, { useState, useEffect } from 'react';
+import { FaEnvelope, FaLock, FaUserGraduate, FaChalkboardTeacher, FaCheckCircle, FaExclamationCircle } from 'react-icons/fa';
 import ParticlesBackground from '../components/ParticlesBackground';
+import DecorativeShapes from '../components/ui/DecorativeShapes';
+import logo from './logo/logo.png';
 
-const Login = ({ onLogin, error, loading, success }) => {
+const Login = ({ onLogin, onVerifyTwoFactor, onRequestOtp, onVerifyOtp, error, loading, success, twoFactorRequired, twoFactorLoading, twoFactorError, onCancelTwoFactor }) => {
   const [isHovering, setIsHovering] = useState(false);
-  
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [otpChannel, setOtpChannel] = useState('email');
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+
+  const handleCodeChange = (value) => {
+    const v = String(value || '').replace(/[^0-9]/g, '').slice(0, 6);
+    setTwoFactorCode(v);
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    const form = e.target;
-    const email = form.email.value;
-    const password = form.password.value;
     onLogin(email, password);
   };
 
+  const handleTwoFactorSubmit = (e) => {
+    e.preventDefault();
+    if (otpRequested && onVerifyOtp) {
+      onVerifyOtp(twoFactorCode);
+    } else if (onVerifyTwoFactor) {
+      onVerifyTwoFactor(twoFactorCode);
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (!onRequestOtp) return;
+    const res = await onRequestOtp(otpChannel);
+    if (res?.ok) {
+      setOtpRequested(true);
+      if (res.cooldownSeconds) setCooldown(res.cooldownSeconds);
+    }
+  };
+
+  useEffect(() => {
+    if (!twoFactorRequired) {
+      setTwoFactorCode('');
+      setOtpRequested(false);
+    }
+  }, [twoFactorRequired]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = setInterval(() => {
+      setCooldown((value) => (value > 0 ? value - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
+  const friendlyTwoFactorError = twoFactorError
+    ? (() => {
+        const m = String(twoFactorError).toLowerCase();
+        if (m.includes('2fa') || m.includes('verificar') || m.includes('inv')) return 'Código 2FA incorrecto';
+        return twoFactorError;
+      })()
+    : '';
+
   return (
-    <div className="login-container" style={{ 
-      position: 'relative', 
-      minHeight: '100vh',
-      display: 'flex',
-      overflow: 'hidden',
-      background: 'linear-gradient(135deg, #0d47a1 0%, #1565c0 50%, #1976d2 100%)'
-    }}>
+    <div className="auth-page">
       <ParticlesBackground theme="educational" />
-      
-      {/* Left Side - Information Panel con diseño más minimalista */}
-      <div className="d-none d-lg-flex flex-column justify-content-center align-items-center" 
-          style={{ 
-            flex: 1, 
-            padding: '2rem',
-            position: 'relative',
-            zIndex: 1
-          }}>
-        <div className="text-center text-white mb-5">
-          <div className="display-4 fw-bold mb-3" style={{textShadow: '1px 1px 10px rgba(0,0,0,0.2)'}}>
-            <span style={{ color: '#0d6efd' }}>GO</span>English
-          </div>
-          <h4 className="mb-4 fw-light" style={{textShadow: '1px 1px 8px rgba(0,0,0,0.3)', letterSpacing: '0.5px'}}>
-            Sistema de Gestión Académica
-          </h4>
+      <DecorativeShapes />
+
+      {/* Panel informativo */}
+      <div className="auth-page__info d-none d-lg-flex">
+        <div className="auth-page__hero">
+          <img src={logo} alt="I.E Peruano Japonés 7213" className="auth-page__hero-logo" />
+          <h1 className="auth-page__title">
+            I.E <span style={{ color: 'var(--accent-color)' }}>Peruano Japonés</span> 7213
+          </h1>
+          <p className="auth-page__subtitle">
+            Plataforma integral para la gestión educativa. Diseñada para conectar estudiantes, docentes y administración.
+          </p>
         </div>
-        
-        <div className="row w-100 gx-4 gy-4">
-          <div className="col-md-6">
-            <div className="card bg-white bg-opacity-10 text-white border-0" 
-                 style={{borderRadius: '10px', backdropFilter: 'blur(10px)'}}>
-              <div className="card-body p-3">
-                <div className="d-flex align-items-center mb-2">
-                  <div className="bg-danger bg-gradient rounded-circle p-2 me-3">
-                    <FaUserGraduate size={16} />
-                  </div>
-                  <h5 className="fw-semibold mb-0">Estudiantes</h5>
-                </div>
-                <p className="mb-0 small">Accede a tus cursos, calificaciones y mantente al día con tus asignaciones académicas.</p>
-              </div>
-            </div>
-          </div>
-          <div className="col-md-6">
-            <div className="card bg-white bg-opacity-10 text-white border-0" 
-                 style={{borderRadius: '10px', backdropFilter: 'blur(10px)'}}>
-              <div className="card-body p-3">
-                <div className="d-flex align-items-center mb-2">
-                  <div className="bg-info bg-gradient rounded-circle p-2 me-3">
-                    <FaChalkboardTeacher size={16} />
-                  </div>
-                  <h5 className="fw-semibold mb-0">Docentes</h5>
-                </div>
-                <p className="mb-0 small">Gestiona tus clases, registra asistencias y administra las calificaciones de tus estudiantes.</p>
-              </div>
-            </div>
-          </div>
+
+        <div className="auth-page__grid">
+          <article className="auth-info-card">
+            <span className="auth-info-card__icon">
+              <FaUserGraduate size={18} />
+            </span>
+            <h5 className="auth-info-card__title">Estudiantes</h5>
+            <p className="auth-info-card__description">
+              Consulta tu progreso académico, tus clases programadas y recibe notificaciones en tiempo real para no perderte ninguna actividad.
+            </p>
+          </article>
+
+          <article className="auth-info-card">
+            <span className="auth-info-card__icon" style={{ background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.9), rgba(59, 130, 246, 0.85))' }}>
+              <FaChalkboardTeacher size={18} />
+            </span>
+            <h5 className="auth-info-card__title">Docentes</h5>
+            <p className="auth-info-card__description">
+              Gestiona tus cursos, registra asistencias, planifica evaluaciones y entrega retroalimentación personalizada.
+            </p>
+          </article>
         </div>
-        
-        <div className="mt-5 text-white text-center">
-          <p className="mb-1 opacity-75 small">© {new Date().getFullYear()} GoEnglish</p>
-          <p className="small opacity-50">La plataforma líder en gestión educativa</p>
-        </div>
+
+        <footer className="auth-page__footer">
+          <span>© {new Date().getFullYear()} I.E Peruano Japonés 7213</span>
+          <span>Excelencia académica con valores interculturales.</span>
+        </footer>
       </div>
-      
-      {/* Right Side - Login Form con diseño minimalista */}
-      <div className="d-flex align-items-center justify-content-center" 
-          style={{ 
-            flex: 1,
-            padding: '2rem',
-            position: 'relative',
-            zIndex: 1
-          }}>
-        <div className="card shadow-lg" style={{ 
-          width: '100%', 
-          maxWidth: '420px',
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-          border: 'none',
-          borderRadius: '16px',
-          boxShadow: '0 8px 20px rgba(0, 0, 0, 0.15)',
-          backdropFilter: 'blur(10px)',
-          animation: 'fadeIn 0.7s ease-out forwards'
-        }}>
-          <div className="card-body p-4">
-            <div className="text-center d-block d-lg-none mb-4">
-              <h3 className="fw-bold">
-                <span style={{ color: '#0d6efd' }}>GO</span>English
-              </h3>
-              <p className="text-muted small">Inicia sesión para continuar</p>
+
+      {/* Panel de formulario */}
+      <div className="auth-page__form">
+        <div className="auth-card">
+          <div className="auth-card__body">
+            <div className="auth-card__header">
+              <div className="auth-card__header--mobile d-lg-none">
+                <img src={logo} alt="I.E Peruano Japonés 7213" className="auth-page__hero-logo" style={{ width: '120px' }} />
+                <div className="section-heading">
+                  <span className="section-heading__eyebrow">Bienvenido de nuevo</span>
+                  <h2 className="section-heading__title" style={{ fontSize: '1.85rem' }}>Accede a tu cuenta</h2>
+                  <p className="section-heading__description" style={{ fontSize: '0.9rem' }}>
+                    Inicia sesión para continuar con tus tareas, clases y comunicaciones.
+                  </p>
+                </div>
+              </div>
+
+              <div className="d-none d-lg-grid section-heading">
+                <span className="section-heading__eyebrow">Bienvenido de nuevo</span>
+                <h2 className="section-heading__title">Gestiona tu experiencia educativa</h2>
+                <p className="section-heading__description" style={{ fontSize: '0.95rem' }}>
+                  Ingresa tus credenciales para acceder al campus virtual. Tus datos permanecen protegidos con autenticación de dos factores.
+                </p>
+              </div>
             </div>
-            
-            <h5 className="mb-4 fw-bold text-center d-none d-lg-block">Bienvenido de nuevo</h5>
-            
+
             {success && (
-              <div className="alert alert-success mb-3 py-2" style={{
-                fontSize: '0.95rem',
-                borderRadius: '8px',
-                border: 'none',
-                boxShadow: '0 4px 12px rgba(25, 135, 84, 0.15)'
-              }}>
-                <div className="d-flex align-items-center">
-                  <i className="fas fa-check-circle me-2"></i>
-                  <div>{success}</div>
+              <div className="alert auth-feedback auth-feedback--success" role="alert">
+                <div className="d-flex align-items-center gap-2">
+                  <FaCheckCircle />
+                  <span>{success}</span>
                 </div>
               </div>
             )}
-            
-            <form onSubmit={handleSubmit}>
-              <div className="mb-3">
-                <label htmlFor="email" className="form-label fw-medium mb-2 small">Correo electrónico</label>
-                <div className="input-group">
-                  <span className="input-group-text border-end-0" style={{
-                    backgroundColor: 'transparent',
-                    borderTopLeftRadius: '8px',
-                    borderBottomLeftRadius: '8px'
-                  }}>
-                    <FaEnvelope style={{ color: '#6c757d' }} size={14} />
-                  </span>
-                  <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    className="form-control border-start-0"
-                    placeholder="nombre@ejemplo.com"
-                    required
-                    style={{
-                      padding: '10px 12px',
-                      backgroundColor: 'transparent',
-                      fontSize: '0.95rem',
-                      borderTopRightRadius: '8px',
-                      borderBottomRightRadius: '8px'
-                    }}
-                  />
+
+            {!twoFactorRequired ? (
+              <form onSubmit={handleSubmit} className="auth-form">
+                <div className="auth-form__field">
+                  <label htmlFor="email" className="auth-label">Correo electrónico</label>
+                  <div className="auth-input-group">
+                    <span className="auth-input-icon">
+                      <FaEnvelope size={16} />
+                    </span>
+                    <input
+                      type="email"
+                      id="email"
+                      name="email"
+                      className="auth-input"
+                      placeholder="nombre@ejemplo.com"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => setEmailFocused(true)}
+                      onBlur={() => setEmailFocused(false)}
+                    />
+                  </div>
                 </div>
-              </div>
-              
-              <div className="mb-3">
-                <div className="d-flex justify-content-between align-items-center mb-2">
-                  <label htmlFor="password" className="form-label fw-medium mb-0 small">Contraseña</label>
-                  <a href="#" className="text-decoration-none small" style={{color: '#0d6efd', fontSize: '0.85rem'}}>¿Olvidaste tu contraseña?</a>
+
+                <div className="auth-form__field">
+                  <div className="auth-helper">
+                    <label htmlFor="password" className="auth-label mb-0">Contraseña</label>
+                    <button type="button" className="btn btn-link p-0 auth-link">¿Olvidaste tu contraseña?</button>
+                  </div>
+                  <div className="auth-input-group">
+                    <span className="auth-input-icon">
+                      <FaLock size={16} />
+                    </span>
+                    <input
+                      type="password"
+                      id="password"
+                      name="password"
+                      className="auth-input"
+                      placeholder="••••••••"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setPasswordFocused(true)}
+                      onBlur={() => setPasswordFocused(false)}
+                    />
+                  </div>
                 </div>
-                <div className="input-group">
-                  <span className="input-group-text border-end-0" style={{
-                    backgroundColor: 'transparent',
-                    borderTopLeftRadius: '8px',
-                    borderBottomLeftRadius: '8px'
-                  }}>
-                    <FaLock style={{ color: '#6c757d' }} size={14} />
-                  </span>
-                  <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    className="form-control border-start-0"
-                    placeholder="••••••••"
-                    required
-                    style={{
-                      padding: '10px 12px',
-                      backgroundColor: 'transparent',
-                      fontSize: '0.95rem',
-                      borderTopRightRadius: '8px',
-                      borderBottomRightRadius: '8px'
-                    }}
-                  />
+
+                <div className="auth-helper auth-checkbox">
+                  <div className="form-check mb-0">
+                    <input className="form-check-input" type="checkbox" id="rememberMe" />
+                    <label className="form-check-label" htmlFor="rememberMe">Mantener sesión iniciada</label>
+                  </div>
                 </div>
-              </div>
-              
-              <div className="mb-4">
-                <div className="form-check">
-                  <input className="form-check-input" type="checkbox" id="rememberMe" />
-                  <label className="form-check-label small" htmlFor="rememberMe">
-                    Mantener sesión iniciada
-                  </label>
-                </div>
-              </div>
-              
-              <button 
-                type="submit" 
-                className="btn btn-primary w-100 py-2"
-                disabled={loading}
-                style={{
-                  borderRadius: '8px',
-                  fontWeight: '600',
-                  fontSize: '0.95rem',
-                  letterSpacing: '0.3px',
-                  transition: 'all 0.3s',
-                  boxShadow: isHovering ? '0 6px 15px rgba(13, 110, 253, 0.25)' : '0 3px 10px rgba(13, 110, 253, 0.2)',
-                  border: 'none',
-                  marginBottom: '1rem',
-                  transform: isHovering ? 'translateY(-2px)' : 'none',
-                  background: isHovering ? 
-                    'linear-gradient(45deg, #0d6efd, #0b5ed7)' : 
-                    'linear-gradient(45deg, #0d6efd, #0d6efd)'
-                }}
-                onMouseEnter={() => setIsHovering(true)}
-                onMouseLeave={() => setIsHovering(false)}
-              >
-                {loading ? (
-                  <div className="d-flex align-items-center justify-content-center">
-                    <div className="spinner-border spinner-border-sm me-2" role="status" style={{width: '0.85rem', height: '0.85rem'}}>
-                      <span className="visually-hidden">Cargando...</span>
+
+                <button
+                  type="submit"
+                  className="auth-button"
+                  disabled={loading}
+                  onMouseEnter={() => setIsHovering(true)}
+                  onMouseLeave={() => setIsHovering(false)}
+                >
+                  {loading ? (
+                    <div className="d-flex align-items-center justify-content-center gap-2">
+                      <div className="spinner-border spinner-border-sm" role="status" style={{ width: '0.9rem', height: '0.9rem' }}>
+                        <span className="visually-hidden">Cargando...</span>
+                      </div>
+                      <span>Iniciando sesión...</span>
                     </div>
-                    <span>Iniciando sesión...</span>
+                  ) : (
+                    'Iniciar sesión'
+                  )}
+                </button>
+
+                {error && (
+                  <div className="alert auth-feedback auth-feedback--error mb-0" role="alert">
+                    <div className="d-flex align-items-center gap-2">
+                      <FaExclamationCircle />
+                      <span>{error}</span>
+                    </div>
                   </div>
-                ) : (
-                  'Iniciar sesión'
                 )}
-              </button>
-              
-              {error && (
-                <div className="alert alert-danger mt-3 py-2" style={{
-                  fontSize: '0.9rem',
-                  borderRadius: '8px',
-                  border: 'none',
-                  boxShadow: '0 4px 12px rgba(220, 53, 69, 0.15)'
-                }}>
-                  <div className="d-flex align-items-center">
-                    <i className="fas fa-exclamation-circle me-2"></i>
-                    <div>{error}</div>
+              </form>
+            ) : (
+              <form onSubmit={handleTwoFactorSubmit} className="auth-form">
+                <div className="section-heading" style={{ gap: '0.45rem' }}>
+                  <span className="section-heading__eyebrow" style={{ fontSize: '0.75rem' }}>Verificación en dos pasos</span>
+                  <h3 className="section-heading__title" style={{ fontSize: '1.35rem' }}>Confirma tu identidad</h3>
+                  <p className="section-heading__description" style={{ fontSize: '0.9rem' }}>
+                    Ingresa el código de 6 dígitos de tu app autenticadora o solicita un código temporal para continuar.
+                  </p>
+                </div>
+
+                <div className="auth-form__field">
+                  <label htmlFor="twoFactorCode" className="auth-label">Código de verificación</label>
+                  <div className="auth-otp-options">
+                    <label className="auth-otp-radio">
+                      <input className="form-check-input" type="radio" name="otpChannel" value="email" checked={otpChannel === 'email'} onChange={() => setOtpChannel('email')} />
+                      Correo
+                    </label>
+                    <label className="auth-otp-radio">
+                      <input className="form-check-input" type="radio" name="otpChannel" value="sms" checked={otpChannel === 'sms'} onChange={() => setOtpChannel('sms')} />
+                      SMS
+                    </label>
+                    <button type="button" className="auth-otp-send" onClick={handleSendOtp} disabled={cooldown > 0}>
+                      {cooldown > 0 ? `Reenviar en ${cooldown}s` : 'Enviar código'}
+                    </button>
+                  </div>
+
+                  <div className="auth-input-group" style={{ justifyContent: 'center' }}>
+                    <span className="auth-input-icon" style={{ width: '56px', fontSize: '0.95rem' }}>
+                      <FaLock size={16} />
+                    </span>
+                    <input
+                      type="text"
+                      id="twoFactorCode"
+                      name="twoFactorCode"
+                      className="auth-input text-center"
+                      placeholder="000000"
+                      value={twoFactorCode}
+                      onChange={(e) => handleCodeChange(e.target.value)}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoFocus
+                      required
+                      style={{ letterSpacing: '6px', fontWeight: 600, fontSize: '1.25rem' }}
+                    />
                   </div>
                 </div>
-              )}
-            </form>
-            
-            <div className="mt-4 text-center">
-              <p className="text-muted mb-0 small">¿Problemas para ingresar? <a href="#" style={{ color: '#0d6efd', textDecoration: 'none', fontWeight: '500' }}>Contacta al administrador</a></p>
-            </div>
+
+                {friendlyTwoFactorError && (
+                  <div className="alert auth-feedback auth-feedback--error" role="alert">
+                    <div className="d-flex align-items-center gap-2">
+                      <FaExclamationCircle />
+                      <span>{friendlyTwoFactorError}</span>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="auth-button"
+                  disabled={twoFactorLoading}
+                >
+                  {twoFactorLoading ? (
+                    <div className="d-flex align-items-center justify-content-center gap-2">
+                      <div className="spinner-border spinner-border-sm" role="status" style={{ width: '0.9rem', height: '0.9rem' }}>
+                        <span className="visually-hidden">Verificando...</span>
+                      </div>
+                      <span>Verificando...</span>
+                    </div>
+                  ) : (
+                    'Confirmar código'
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="auth-secondary-button"
+                  onClick={onCancelTwoFactor}
+                  disabled={twoFactorLoading}
+                >
+                  Cancelar y volver al inicio de sesión
+                </button>
+              </form>
+            )}
+
+            <div className="auth-divider" />
+            <p className="auth-support mb-0">
+              ¿Problemas para ingresar? <span>Contacta al administrador</span>
+            </p>
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .input-group:focus-within {
-          box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
-          border-radius: 8px;
-        }
-        
-        .input-group:focus-within .input-group-text {
-          background-color: #fff !important;
-          border-color: #86b7fe;
-        }
-        
-        .input-group:focus-within .form-control {
-          background-color: #fff !important;
-          border-color: #86b7fe;
-          box-shadow: none;
-        }
-        
-        .form-control:focus {
-          box-shadow: none;
-        }
-        
-        @media (max-width: 992px) {
-          .login-container {
-            background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
-          }
-        }
-      `}</style>
     </div>
   );
 };

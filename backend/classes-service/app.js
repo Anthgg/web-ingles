@@ -1,94 +1,206 @@
 const express = require('express');
-const mysql = require('mysql2');
+const mysql = require('mysql2/promise');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const { createConfig } = require('../config');
 
 const app = express();
-app.use(cors());
+const config = createConfig({
+  serviceName: 'classes-service',
+  serviceRoot: __dirname,
+  defaults: {
+    DB_NAME: 'instenglish_classes',
+    PORT: 3005,
+  },
+});
+
+const { env, corsOrigins } = config;
+
+app.use(cors({ origin: corsOrigins.length ? corsOrigins : true, credentials: true }));
 app.use(express.json());
 
-const SECRET_KEY = 'tu_clave_super_secreta';
+const SECRET_KEY = env.JWT_SECRET;
 
-const connection = mysql.createConnection({
-  host: 'instenglish-auth.c50qcacwip4o.us-east-2.rds.amazonaws.com',
-  user: 'admin',
-  password: 'GgAnth17',
-  database: 'instenglish_classes',
-  port: 3306,
+// Pool de conexiones
+const pool = mysql.createPool({
+  host: env.DB_HOST,
+  user: env.DB_USER,
+  password: env.DB_PASSWORD,
+  database: env.DB_NAME,
+  port: env.DB_PORT,
+  waitForConnections: true,
+  connectionLimit: env.DB_POOL_SIZE,
+  queueLimit: 0
 });
 
-connection.connect(err => {
-  if (err) {
-    console.error('DB connection error:', err);
-  } else {
-    console.log('Classes Service DB connected');
-  }
-});
+// Helper async
+const asyncHandler = handler => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
+// Middleware JWT con roles
 function authMiddleware(allowedRoles = []) {
   return (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ error: 'Token requerido' });
 
     const token = authHeader.split(' ')[1];
-    jwt.verify(token, SECRET_KEY, (err, decoded) => {
-      if (err) return res.status(401).json({ error: 'Token inválido' });
+    try {
+      const decoded = jwt.verify(token, SECRET_KEY);
       req.user = decoded;
 
-      if (allowedRoles.length && !allowedRoles.includes(req.user.rol)) {
-        return res.status(403).json({ error: 'No tienes permisos para acceder a esta ruta' });
+      if (allowedRoles.length > 0 && !allowedRoles.includes(decoded.rol)) {
+        return res.status(403).json({ error: 'No tienes permiso para acceder a este recurso' });
       }
       next();
-    });
+    } catch (error) {
+      return res.status(401).json({ error: 'Token inválido' });
+    }
   };
 }
 
-// Listar clases (todos los roles)
-app.get('/materias', authMiddleware(), (req, res) => {
-  connection.query('SELECT * FROM materias', (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
-});
+/* ===================== Rutas: Materias ===================== */
 
-// Crear clase (administrativo)
-app.post('/materias', authMiddleware(['administrativo']), (req, res) => {
+// Listar materias
+app.get('/materias', authMiddleware(['administrativo', 'admin', 'profesor', 'estudiante']), asyncHandler(async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM materias');
+  res.json(rows);
+}));
+
+// Crear materia
+app.post('/materias', authMiddleware(['administrativo']), asyncHandler(async (req, res) => {
   const { nombre, descripcion } = req.body;
-  if (!nombre) return res.status(400).json({ error: 'Faltan datos' });
+  if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
 
-  connection.query(
+  const [result] = await pool.execute(
     'INSERT INTO materias (nombre, descripcion) VALUES (?, ?)',
-    [nombre, descripcion],
-    (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ id: results.insertId, nombre, descripcion });
-    }
+    [nombre, descripcion ?? null]
   );
-});
+  res.status(201).json({ id: result.insertId, nombre, descripcion: descripcion ?? null });
+}));
 
-// Editar clase (administrativo)
-app.put('/materias/:id', authMiddleware(['administrativo']), (req, res) => {
+// Actualizar materia
+app.put('/materias/:id', authMiddleware(['administrativo']), asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { nombre, descripcion } = req.body;
-  if (!nombre) return res.status(400).json({ error: 'Faltan datos' });
+  if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
 
-  connection.query(
+  const [r] = await pool.execute(
     'UPDATE materias SET nombre = ?, descripcion = ? WHERE id = ?',
-    [nombre, descripcion, id],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Clase actualizada' });
-    }
+    [nombre, descripcion ?? null, id]
   );
-});
+  if (r.affectedRows === 0) return res.status(404).json({ error: 'Materia no encontrada' });
+  res.json({ message: 'Materia actualizada correctamente' });
+}));
 
-// Eliminar clase (administrativo)
-app.delete('/materias/:id', authMiddleware(['administrativo']), (req, res) => {
+// Eliminar materia
+app.delete('/materias/:id', authMiddleware(['administrativo']), asyncHandler(async (req, res) => {
   const { id } = req.params;
-  connection.query('DELETE FROM materias WHERE id = ?', [id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: 'Clase eliminada' });
+  const [r] = await pool.execute('DELETE FROM materias WHERE id = ?', [id]);
+  if (r.affectedRows === 0) return res.status(404).json({ error: 'Materia no encontrada' });
+  res.json({ message: 'Materia eliminada correctamente' });
+}));
+
+/* ===================== Rutas: Ciclos ===================== */
+
+// Listar ciclos
+app.get('/ciclos', authMiddleware(), asyncHandler(async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM ciclos');
+  res.json(rows);
+}));
+
+// Crear ciclo
+app.post('/ciclos', authMiddleware(['administrativo']), asyncHandler(async (req, res) => {
+  const { nombre, fecha_inicio, fecha_fin } = req.body;
+  if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
+
+  const [result] = await pool.execute(
+    'INSERT INTO ciclos (nombre, fecha_inicio, fecha_fin) VALUES (?, ?, ?)',
+    [nombre, fecha_inicio ?? null, fecha_fin ?? null]
+  );
+  res.status(201).json({ id: result.insertId, nombre, fecha_inicio: fecha_inicio ?? null, fecha_fin: fecha_fin ?? null });
+}));
+
+// Asignar materia a ciclo
+app.post('/ciclos/:cicloId/materias', authMiddleware(['administrativo']), asyncHandler(async (req, res) => {
+  const { cicloId } = req.params;
+  const { materia_id } = req.body;
+  if (!materia_id) return res.status(400).json({ error: 'ID de materia requerido' });
+
+  await pool.execute(
+    'INSERT INTO cursos_ciclos (ciclo_id, materia_id) VALUES (?, ?)',
+    [cicloId, materia_id]
+  );
+  res.status(201).json({ message: 'Materia asignada al ciclo correctamente' });
+}));
+
+/* ===================== Rutas: Asignaciones ===================== */
+
+// Asignar alumno a ciclo y curso en transacción
+app.post('/asignar-ciclo-curso', authMiddleware(['administrativo']), asyncHandler(async (req, res) => {
+  const { alumno_id, ciclo_id, materia_id } = req.body;
+  if (!alumno_id || !ciclo_id || !materia_id) {
+    return res.status(400).json({ error: 'Todos los IDs son requeridos' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    await conn.execute(
+      'INSERT INTO alumnos_ciclos (alumno_id, ciclo_id) VALUES (?, ?)',
+      [alumno_id, ciclo_id]
+    );
+
+    await conn.execute(
+      'INSERT INTO cursos_ciclos (ciclo_id, materia_id) VALUES (?, ?)',
+      [ciclo_id, materia_id]
+    );
+
+    await conn.commit();
+    res.status(201).json({ message: 'Alumno y curso asignados al ciclo correctamente' });
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}));
+
+// Materias de un alumno según su ciclo actual
+app.get('/alumnos/:alumnoId/materias', authMiddleware(), asyncHandler(async (req, res) => {
+  const { alumnoId } = req.params;
+
+  const [cicloRows] = await pool.query(
+    'SELECT ciclo_id FROM alumnos_ciclos WHERE alumno_id = ? ORDER BY id DESC LIMIT 1',
+    [alumnoId]
+  );
+  if (!cicloRows.length) return res.status(404).json({ error: 'Alumno no tiene ciclo asignado' });
+
+  const cicloId = cicloRows[0].ciclo_id;
+
+  const [materiasRows] = await pool.query(
+    `SELECT m.*, cc.id AS curso_ciclo_id
+     FROM cursos_ciclos cc
+     JOIN materias m ON cc.materia_id = m.id
+     WHERE cc.ciclo_id = ?`,
+    [cicloId]
+  );
+
+  res.json({ ciclo_id: cicloId, materias: materiasRows });
+}));
+
+/* ===================== Error handler único ===================== */
+app.use((err, req, res, next) => {
+  console.error('Error en Classes Service:', err);
+  const status = err.statusCode || err.status || 500;
+  res.status(status).json({
+    error: status === 500 ? 'Error interno del servidor' : err.message,
+    message: env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
-app.listen(3005, () => console.log('Classes Service running on http://localhost:3005'));
+/* ===================== Inicio del servidor (una sola vez) ===================== */
+app.listen(env.PORT, () => {
+  console.log(`Servicio de clases escuchando en puerto ${env.PORT}`);
+});

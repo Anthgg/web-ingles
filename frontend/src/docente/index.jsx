@@ -1,6 +1,6 @@
 import React from 'react';
+import { useTheme } from '../context/ThemeContext';
 import {
-  FaUser,
   FaChalkboardTeacher,
   FaClipboardCheck,
   FaGraduationCap,
@@ -10,14 +10,13 @@ import {
   FaBook,
   FaHome,
   FaBell,
-  FaCog
+  FaCog,
+  FaMoon,
+  FaSun
 } from 'react-icons/fa';
-import ClasesList from '../components/ClasesList';
-import AsistenciasList from '../components/AsistenciasList';
-import CalificacionesList from '../components/CalificacionesList';
-import CursosAsignadosDocente from '../components/ProfesoresAsignaturas';
-import ProfesoresAsignaturas from '../components/ProfesoresAsignaturas';
 import MisAsignacionesDocente from '../components-docente/MisAsignacionesDocente';
+import Configuracion from '../components/Configuracion';
+import Chat from '../components/Chat';
 
 const TeacherDashboard = ({
   userInfo,
@@ -38,6 +37,7 @@ const TeacherDashboard = ({
   showError,
   showSuccess
 }) => {
+  const { isDark, toggleTheme } = useTheme();
   const misAsignaciones = Array.isArray(asignaciones)
     ? asignaciones.filter(a => a.profesor_nombre === userInfo.nombre)
     : [];
@@ -45,22 +45,30 @@ const TeacherDashboard = ({
   const asignaturasUnicas = [...new Set(misAsignaciones.map(a => a.curso_nombre))];
 
   return (
-    <div className="d-flex" style={{ minHeight: '100vh', backgroundColor: '#f8f9fa' }}>
+    <div className="d-flex docente-dashboard-root" style={{ minHeight: '100vh', backgroundColor: 'var(--bg-secondary)' }}>
       {/* Sidebar navigation */}
       <nav className="position-fixed shadow-lg bg-white text-dark p-4" 
         style={{ 
           width: '280px', 
           height: '100vh',
           overflowY: 'auto',
-          borderRight: '1px solid rgba(0,0,0,0.05)',
+          borderRight: '1px solid var(--border-color)',
           zIndex: 1000
         }}>
         <div className="d-flex flex-column h-100">
           {/* Logo y título */}
           <div className="text-center mb-4">
-            <h3 className="fw-bold text-success mb-0">Go<span className="text-primary">English</span></h3>
+            <img 
+              src="./logo.png" 
+              alt="I.E Peruano Japonés 7213" 
+              style={{ width: "70px", height: "70px", objectFit: "contain", marginBottom: "8px" }}
+            />
+            <h3 className="fw-bold text-success mb-0">
+              I.E Peruano Japonés 7213
+            </h3>
             <div className="small text-muted">Panel del Docente</div>
           </div>
+
 
           {/* User info */}
           <div className="bg-light rounded-4 p-3 mb-4">
@@ -129,6 +137,30 @@ const TeacherDashboard = ({
                 Calificaciones
               </button>
             </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeModule === 'chat' ? 'active bg-success' : 'text-dark'
+                }`}
+                onClick={() => setActiveModule('chat')}
+                style={{ borderRadius: '12px', fontWeight: '500', padding: '12px' }}
+              >
+                <FaBell className="me-3" />
+                Mensajería
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeModule === 'configuracion' ? 'active bg-success' : 'text-dark'
+                }`}
+                onClick={() => setActiveModule('configuracion')}
+                style={{ borderRadius: '12px', fontWeight: '500', padding: '12px' }}
+              >
+                <FaCog className="me-3" />
+                Configuración
+              </button>
+            </li>
           </ul>
 
           <div className="mt-auto pt-3 border-top">
@@ -157,19 +189,23 @@ const TeacherDashboard = ({
               {activeModule === 'dashboard' && 'Dashboard Principal'}
               {activeModule === 'asistencias' && 'Control de Asistencia'}
               {activeModule === 'calificaciones' && 'Gestión de Calificaciones'}
+              {activeModule === 'chat' && 'Mensajería Interna'}
             </h4>
             <nav aria-label="breadcrumb">
               <ol className="breadcrumb mb-0 small">
-                <li className="breadcrumb-item"><a href="#" className="text-decoration-none">Go English</a></li>
+                <li className="breadcrumb-item"><span className="text-decoration-none text-muted">I.E Peruano Japonés 7213</span></li>
                 <li className="breadcrumb-item active" aria-current="page">{activeModule}</li>
               </ol>
             </nav>
           </div>
           <div className="d-flex gap-2">
+            <button className="btn-theme-toggle" type="button" onClick={toggleTheme} title={isDark ? 'Modo claro' : 'Modo oscuro'}>
+              {isDark ? <FaSun size={16} /> : <FaMoon size={16} />}
+            </button>
             <button className="btn btn-light rounded-circle" style={{width: '40px', height: '40px'}}>
               <FaBell />
             </button>
-            <button className="btn btn-light rounded-circle" style={{width: '40px', height: '40px'}}>
+            <button className="btn btn-light rounded-circle" style={{width: '40px', height: '40px'}} onClick={() => setActiveModule('configuracion')}>
               <FaCog />
             </button>
           </div>
@@ -373,9 +409,32 @@ const TeacherDashboard = ({
             </div>
           </div>
         )}
+        {activeModule === 'chat' && !loading && (
+          <div className="card border-0 shadow-sm rounded-4">
+            <div className="card-body p-0">
+              <Chat user={userInfo} token={token} />
+            </div>
+          </div>
+        )}
+        {activeModule === 'configuracion' && !loading && (
+          <div className="card border-0 shadow-sm rounded-4">
+            <div className="card-body p-0">
+              <Configuracion
+                userInfo={userInfo}
+                darkMode={isDark}
+                toggleTheme={toggleTheme}
+                token={token}
+                showError={showError}
+                showSuccess={showSuccess}
+              />
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
 };
 
 export default TeacherDashboard;
+

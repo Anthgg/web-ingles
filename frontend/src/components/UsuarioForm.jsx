@@ -59,7 +59,7 @@ function UsuarioForm({ token, onSave, editingUser, onCancel }) {
 
   return (
     <Card className="shadow-lg border-0 overflow-hidden mb-4">
-      <style jsx>{`
+  <style>{`
         .form-card {
           transition: all 0.3s ease;
           animation: slideInDown 0.5s ease-out;

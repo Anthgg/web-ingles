@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ConfirmDialog from './ui/ConfirmDialog';
 import { Button, Modal, Form, Card, Container, Row, Col, Badge } from 'react-bootstrap';
 import { FaEdit, FaTrash, FaPlus, FaBook, FaGraduationCap, FaFileAlt } from 'react-icons/fa';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -8,6 +9,8 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
   const [formData, setFormData] = useState({ nombre: '', descripcion: '' });
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [claseToDelete, setClaseToDelete] = useState(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -46,8 +49,6 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar esta clase?')) return;
-    
     try {
       const res = await fetch(`http://localhost:3005/materias/${id}`, {
         method: 'DELETE',
@@ -60,6 +61,18 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
       fetchClases();
     } catch (err) {
       showError(err.message);
+    }
+  };
+
+  const handleDeleteClick = (clase) => {
+    setClaseToDelete(clase);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = () => {
+    if (claseToDelete) {
+      handleDelete(claseToDelete.id);
+      setClaseToDelete(null);
     }
   };
 
@@ -81,7 +94,7 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
 
   return (
     <Container fluid className="py-4">
-      <style jsx>{`
+  <style>{`
         .class-card {
           transition: all 0.3s ease;
           border: none;
@@ -185,7 +198,7 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
             <div>
               <h1 className="header-title display-4 mb-2">
                 <FaGraduationCap className="me-3" />
-                Gestión de Clases
+                Gestión de Cursos
               </h1>
               <p className="text-muted lead">Administra las clases y materias del sistema</p>
             </div>
@@ -203,7 +216,7 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
 
       {/* Cards Grid */}
       <Row className="g-4">
-        {clases.map((clase, index) => (
+        {(Array.isArray(clases) ? clases : []).map((clase, index) => (
           <Col key={clase.id} xl={4} lg={6} md={6} sm={12}>
             <Card 
               className="class-card fade-in-card h-100"
@@ -229,7 +242,7 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
                     variant="outline-danger"
                     size="sm"
                     className="action-btn"
-                    onClick={() => handleDelete(clase.id)}
+                    onClick={() => handleDeleteClick(clase)}
                   >
                     <FaTrash />
                   </Button>
@@ -366,6 +379,21 @@ const ClasesList = ({ clases, token, fetchClases, showError, showSuccess }) => {
           </Form>
         </Modal.Body>
       </Modal>
+
+      {/* Confirm Delete Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        onClose={() => {
+          setShowDeleteDialog(false);
+          setClaseToDelete(null);
+        }}
+        onConfirm={confirmDelete}
+        title="¿Eliminar clase?"
+        message={`¿Estás seguro de que deseas eliminar la clase "${claseToDelete?.nombre}"? Esta acción no se puede deshacer.`}
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        type="danger"
+      />
     </Container>
   );
 };

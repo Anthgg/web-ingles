@@ -1,0 +1,40 @@
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary, #f5f7fb);
+}
+
+.app-shell__navbar {
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  background: var(--bg-secondary, #ffffff);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.app-shell__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-shell__sidebar {
+  width: 260px;
+  max-width: 100%;
+  background: var(--bg-secondary, #ffffff);
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  overflow-y: auto;
+}
+
+.app-shell__content {
+  flex: 1;
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.app-shell__footer {
+  background: var(--bg-secondary, #ffffff);
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 0.75rem 1.5rem;
+}

@@ -1,0 +1,37 @@
+.app-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 1300;
+}
+
+.app-modal {
+  background: #ffffff;
+  border-radius: 1rem;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  max-width: 640px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 4rem);
+}
+
+.app-modal__header,
+.app-modal__footer {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.app-modal__footer {
+  border-bottom: none;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.app-modal__body {
+  padding: 1.5rem;
+  overflow-y: auto;
+}

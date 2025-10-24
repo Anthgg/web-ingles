@@ -1,9 +1,28 @@
 import React, { useState } from 'react';
+import ConfirmDialog from './ui/ConfirmDialog';
 import { FaEdit, FaTrash, FaPlus, FaStar, FaUser, FaBook, FaTrophy, FaGraduationCap } from 'react-icons/fa';
-import { Modal, Button, Form, Card, Container, Row, Col, Badge, Alert } from 'react-bootstrap';
+import { Modal, Button, Form, Card, Container, Row, Col, Badge } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
-const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCalificaciones, showError, showSuccess }) => {
+const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCalificaciones, showError, showSuccess, onPromote }) => {
+  // Calcular promedio por estudiante y materia
+  const getPromedioPorEstudianteMateria = (estudiante_id, materia_id) => {
+    const califs = calificaciones.filter(c => c.estudiante_id === estudiante_id && c.materia_id === materia_id);
+    if (califs.length === 0) return null;
+    const suma = califs.reduce((acc, c) => acc + parseFloat(c.calificacion), 0);
+    return suma / califs.length;
+  };
+
+  // Promocionar estudiante si el promedio es suficiente
+  const handlePromote = (estudiante_id, materia_id) => {
+    const promedio = getPromedioPorEstudianteMateria(estudiante_id, materia_id);
+    if (promedio >= 10.5 && onPromote) {
+      onPromote(estudiante_id);
+      showSuccess('Estudiante promovido al siguiente ciclo');
+    } else {
+      showError('El promedio no es suficiente para promover');
+    }
+  };
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ 
     estudiante_id: '', 
@@ -12,6 +31,8 @@ const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCali
   });
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [calificacionToDelete, setCalificacionToDelete] = useState(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -57,8 +78,6 @@ const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCali
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar esta calificación?')) return;
-    
     try {
       const res = await fetch(`http://localhost:3004/calificaciones/${id}`, {
         method: 'DELETE',
@@ -71,6 +90,18 @@ const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCali
       fetchCalificaciones();
     } catch (err) {
       showError(err.message);
+    }
+  };
+
+  const handleDeleteClick = (calificacion) => {
+    setCalificacionToDelete(calificacion);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = () => {
+    if (calificacionToDelete) {
+      handleDelete(calificacionToDelete.id);
+      setCalificacionToDelete(null);
     }
   };
 
@@ -127,7 +158,7 @@ const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCali
 
   return (
     <Container fluid className="py-4">
-      <style jsx>{`
+  <style>{`
         .grade-card {
           transition: all 0.3s ease;
           border: none;
@@ -245,69 +276,84 @@ const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCali
 
       {/* Cards Grid */}
       <Row className="g-4">
-        {calificaciones.map((calificacion, index) => (
-          <Col key={calificacion.id} xl={4} lg={6} md={6} sm={12}>
-            <Card 
-              className="grade-card fade-in-card h-100"
-              style={{ '--delay': `${index * 0.1}s` }}
-            >
-              <Card.Header className="bg-light border-0 d-flex justify-content-between align-items-center">
-                <Badge 
-                  className="grade-badge-large"
-                  bg={getGradeBadgeVariant(calificacion.calificacion)}
-                >
-                  {getGradeIcon(calificacion.calificacion)}
-                  {calificacion.calificacion}
-                </Badge>
-                <div>
-                  <Button
-                    variant="outline-warning"
-                    size="sm"
-                    className="action-btn me-2"
-                    onClick={() => handleEdit(calificacion)}
-                  >
-                    <FaEdit />
-                  </Button>
-                  <Button
-                    variant="outline-danger"
-                    size="sm"
-                    className="action-btn"
-                    onClick={() => handleDelete(calificacion.id)}
-                  >
-                    <FaTrash />
-                  </Button>
-                </div>
-              </Card.Header>
-              
-              <Card.Body>
-                <div className="text-center mb-3">
+        {(Array.isArray(calificaciones) ? calificaciones : []).map((calificacion, index) => {
+          const promedio = getPromedioPorEstudianteMateria(calificacion.estudiante_id, calificacion.materia_id);
+          return (
+            <Col key={calificacion.id} xl={4} lg={6} md={6} sm={12}>
+              <Card 
+                className="grade-card fade-in-card h-100"
+                style={{ '--delay': `${index * 0.1}s` }}
+              >
+                <Card.Header className="bg-light border-0 d-flex justify-content-between align-items-center">
                   <Badge 
+                    className="grade-badge-large"
                     bg={getGradeBadgeVariant(calificacion.calificacion)}
-                    className="mb-2"
                   >
-                    {getGradeText(calificacion.calificacion)}
+                    {getGradeIcon(calificacion.calificacion)}
+                    {calificacion.calificacion}
                   </Badge>
-                </div>
-                
-                <div className="info-row d-flex align-items-center">
-                  <FaUser className="text-primary me-3" />
                   <div>
-                    <small className="text-muted d-block">Estudiante</small>
-                    <strong>{getUsuarioNombre(calificacion.estudiante_id)}</strong>
+                    <Button
+                      variant="outline-warning"
+                      size="sm"
+                      className="action-btn me-2"
+                      onClick={() => handleEdit(calificacion)}
+                    >
+                      <FaEdit />
+                    </Button>
+                    <Button
+                      variant="outline-danger"
+                      size="sm"
+                      className="action-btn"
+                      onClick={() => handleDeleteClick(calificacion)}
+                    >
+                      <FaTrash />
+                    </Button>
                   </div>
-                </div>
-                
-                <div className="info-row d-flex align-items-center">
-                  <FaBook className="text-info me-3" />
-                  <div>
-                    <small className="text-muted d-block">Clase</small>
-                    <strong>{getClaseNombre(calificacion.materia_id)}</strong>
+                </Card.Header>
+                <Card.Body>
+                  <div className="text-center mb-3">
+                    <Badge 
+                      bg={getGradeBadgeVariant(calificacion.calificacion)}
+                      className="mb-2"
+                    >
+                      {getGradeText(calificacion.calificacion)}
+                    </Badge>
                   </div>
-                </div>
-              </Card.Body>
-            </Card>
-          </Col>
-        ))}
+                  <div className="info-row d-flex align-items-center">
+                    <FaUser className="text-primary me-3" />
+                    <div>
+                      <small className="text-muted d-block">Estudiante</small>
+                      <strong>{getUsuarioNombre(calificacion.estudiante_id)}</strong>
+                    </div>
+                  </div>
+                  <div className="info-row d-flex align-items-center">
+                    <FaBook className="text-info me-3" />
+                    <div>
+                      <small className="text-muted d-block">Clase</small>
+                      <strong>{getClaseNombre(calificacion.materia_id)}</strong>
+                    </div>
+                  </div>
+                  {promedio !== null && (
+                    <div className="mt-3">
+                      <strong>Promedio en este curso:</strong> {promedio.toFixed(2)}
+                      {promedio >= 10.5 && (
+                        <Button
+                          variant="success"
+                          size="sm"
+                          className="ms-3"
+                          onClick={() => handlePromote(calificacion.estudiante_id, calificacion.materia_id)}
+                        >
+                          Promover ciclo
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </Card.Body>
+              </Card>
+            </Col>
+          );
+        })}
       </Row>
 
       {/* Modal */}
@@ -413,6 +459,21 @@ const CalificacionesList = ({ calificaciones, usuarios, clases, token, fetchCali
           </Form>
         </Modal.Body>
       </Modal>
+
+      {/* Confirm Delete Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        onClose={() => {
+          setShowDeleteDialog(false);
+          setCalificacionToDelete(null);
+        }}
+        onConfirm={confirmDelete}
+        title="¿Eliminar calificación?"
+        message={`¿Estás seguro de que deseas eliminar esta calificación? Esta acción no se puede deshacer.`}
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        type="danger"
+      />
     </Container>
   );
 };

@@ -119,7 +119,7 @@ function AsistenciaForm({ token, onSave, usuarios, clases, editingAsistencia, on
 
   return (
     <>
-      <style jsx>{`
+  <style>{`
         .asistencia-form {
           background: var(--bg-primary, #ffffff);
           border: 1px solid var(--border-color, #e2e8f0);

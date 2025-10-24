@@ -1,0 +1,22 @@
+{
+  "private": true,
+  "workspaces": [
+    "virtual-campus/apps/*",
+    "virtual-campus/packages/*"
+  ],
+  "scripts": {
+    "services:start": "node backend/run/app.js",
+    "bootstrap:services": "node backend/run/bootstrap-services.js",
+    "bootstrap:services:test-only": "node backend/run/bootstrap-services.js --skip-install",
+    "bootstrap:services:install-only": "node backend/run/bootstrap-services.js --skip-test",
+    "vc:api:dev": "npm run dev --workspace @virtual-campus/api",
+    "vc:api:build": "npm run build --workspace @virtual-campus/api",
+    "vc:web:dev": "npm run dev --workspace @virtual-campus/web",
+    "vc:web:build": "npm run build --workspace @virtual-campus/web"
+  },
+  "dependencies": {
+    "dotenv-flow": "^4.1.0",
+    "envalid": "^8.1.0",
+    "socket.io": "^4.8.1"
+  }
+}

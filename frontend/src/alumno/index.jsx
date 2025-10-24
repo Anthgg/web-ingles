@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useTheme } from '../context/ThemeContext';
 import { 
   FaUser, 
   FaClipboardCheck, 
@@ -9,11 +10,15 @@ import {
   FaCog, 
   FaChartLine,
   FaCalendarAlt,
-  FaTrophy
+  FaTrophy,
+  FaPlus,
+  FaTimes,
+  FaSync,
+  FaIdBadge
 } from 'react-icons/fa';
-import ClasesList from '../components/ClasesList';
-import CalificacionesList from '../components/CalificacionesList';
-import AsistenciasList from '../components/AsistenciasList';        
+import Configuracion from '../components/Configuracion';
+import Chat from '../components/Chat';
+import StudentInternalForm from '../components/StudentInternalForm';
 
 // ============================================
 // DASHBOARD ESPECÍFICO PARA ESTUDIANTES
@@ -34,10 +39,82 @@ const StudentDashboard = ({
   misAsistencias = [],
   misCalificaciones = [],
   misClases = [],
+  misCursos = [],
+  cursosDisponibles = [],
+  fetchMisCursos = () => {},
+  fetchCursosDisponibles = () => {},
+  onInscribirseCurso,
+  onCancelarInscripcionCurso,
   token,
   showError,
   showSuccess
 }) => {
+  const { isDark, toggleTheme } = useTheme();
+  const [enrollingId, setEnrollingId] = useState(null);
+  const [droppingId, setDroppingId] = useState(null);
+  const [refreshingCursos, setRefreshingCursos] = useState(false);
+
+  const cursosInscritos = Array.isArray(misCursos) && misCursos.length ? misCursos : misClases;
+  const disponibles = Array.isArray(cursosDisponibles) ? cursosDisponibles : [];
+  const totalCursosInscritos = cursosInscritos.length;
+
+  useEffect(() => {
+    if (fetchMisCursos) {
+      fetchMisCursos(true);
+    }
+    if (fetchCursosDisponibles) {
+      fetchCursosDisponibles(true);
+    }
+  }, [fetchMisCursos, fetchCursosDisponibles]);
+
+  useEffect(() => {
+    if (activeModule === 'seleccionar-curso') {
+      if (fetchMisCursos) {
+        fetchMisCursos(true);
+      }
+      if (fetchCursosDisponibles) {
+        fetchCursosDisponibles(true);
+      }
+    }
+  }, [activeModule, fetchMisCursos, fetchCursosDisponibles]);
+
+  const handleRefreshCursos = async () => {
+    if (!fetchMisCursos && !fetchCursosDisponibles) {
+      return;
+    }
+    setRefreshingCursos(true);
+    try {
+      if (fetchMisCursos) {
+        await fetchMisCursos(true);
+      }
+      if (fetchCursosDisponibles) {
+        await fetchCursosDisponibles(true);
+      }
+    } finally {
+      setRefreshingCursos(false);
+    }
+  };
+
+  const handleInscribirse = async (asignacionId) => {
+    if (!onInscribirseCurso) return;
+    setEnrollingId(asignacionId);
+    try {
+      await onInscribirseCurso(asignacionId);
+    } finally {
+      setEnrollingId(null);
+    }
+  };
+
+  const handleCancelarInscripcion = async (asignacionId) => {
+    if (!onCancelarInscripcionCurso) return;
+    setDroppingId(asignacionId);
+    try {
+      await onCancelarInscripcionCurso(asignacionId);
+    } finally {
+      setDroppingId(null);
+    }
+  };
+
   // Calcular estadísticas del estudiante
   const calcularPromedio = () => {
     if (misCalificaciones.length === 0) return "N/A";
@@ -49,6 +126,21 @@ const StudentDashboard = ({
     if (misAsistencias.length === 0) return "0%";
     const presentes = misAsistencias.filter(a => a.presente).length;
     return Math.round((presentes / misAsistencias.length) * 100) + "%";
+  };
+
+  const resolverCursoId = (curso = {}) => curso.asignacionId ?? curso.id ?? curso.cursoId ?? curso.materiaId ?? curso.codigo;
+  const resolverNombreCurso = (curso = {}) => curso.curso_nombre ?? curso.nombreCurso ?? curso.nombre ?? curso.curso ?? curso.titulo ?? 'Curso sin título';
+  const resolverDocenteCurso = (curso = {}) => curso.profesor_nombre ?? curso.docenteNombre ?? curso.profesor ?? curso.docente ?? curso.maestro ?? curso.teacher ?? 'Docente no asignado';
+  const resolverHorarioCurso = (curso = {}) => curso.horario ?? curso.horarioDescripcion ?? curso.horarioTexto ?? curso.horarioDetallado ?? curso.horarioCompleto ?? curso.hora ?? null;
+  const resolverCuposDisponibles = (curso = {}) => {
+    if (curso.cuposDisponibles != null) return curso.cuposDisponibles;
+    if (curso.cupos != null) return curso.cupos;
+    if (curso.capacidadDisponible != null) return curso.capacidadDisponible;
+    if (curso.capacidad != null && curso.inscritos != null) {
+      const restantes = curso.capacidad - curso.inscritos;
+      return restantes >= 0 ? restantes : 0;
+    }
+    return null;
   };
 
   return (
@@ -64,7 +156,19 @@ const StudentDashboard = ({
         }}>
         <div className="d-flex flex-column h-100 p-4">
           <div className="text-center mb-4 pb-3 border-bottom border-light border-opacity-25">
-            <h3 className="fw-bold text-white mb-0">Go<span className="text-warning">English</span></h3>
+                  <img
+                src="/logo.png"
+                alt="Logo IE"
+                style={{
+                  width: '90px',
+                  height: '90px',
+                  objectFit: 'contain',
+                  marginBottom: '12px',
+                  borderRadius: '50%'
+                }}
+              />
+            <h3 className="fw-bold text-white mb-0">I.E Peruano Japonés 7213</h3>
+           <br/>
             <div className="small text-light opacity-75">Panel del Estudiante</div>
           </div>
         
@@ -106,6 +210,22 @@ const StudentDashboard = ({
             <li className="nav-item">
               <button
                 className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeModule === 'seleccionar-curso' ? 'active bg-warning text-dark' : 'text-white'
+                }`}
+                onClick={() => setActiveModule('seleccionar-curso')}
+                style={{
+                  borderRadius: '12px',
+                  fontWeight: '500',
+                  padding: '12px'
+                }}
+              >
+                <FaPlus className="me-3" />
+                Seleccionar Curso
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
                   activeModule === 'mis-asistencias' ? 'active bg-warning text-dark' : 'text-white'
                 }`}
                 onClick={() => setActiveModule('mis-asistencias')}
@@ -135,6 +255,38 @@ const StudentDashboard = ({
                 Mis Calificaciones
               </button>
             </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeModule === 'ficha-interna' ? 'active bg-warning text-dark' : 'text-white'
+                }`}
+                onClick={() => setActiveModule('ficha-interna')}
+                style={{
+                  borderRadius: '12px',
+                  fontWeight: '500',
+                  padding: '12px'
+                }}
+              >
+                <FaIdBadge className="me-3" />
+                Ficha interna
+              </button>
+            </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link w-100 text-start d-flex align-items-center ${
+                  activeModule === 'chat' ? 'active bg-warning text-dark' : 'text-white'
+                }`}
+                onClick={() => setActiveModule('chat')}
+                style={{
+                  borderRadius: '12px',
+                  fontWeight: '500',
+                  padding: '12px'
+                }}
+              >
+                <FaBell className="me-3" />
+                Mensajería
+              </button>
+            </li>
           </ul>
           
           <div className="mt-auto pt-3 border-top border-light border-opacity-25">
@@ -162,16 +314,20 @@ const StudentDashboard = ({
       }}>
         {/* Header de navegación */}
         <div className="d-flex justify-content-between align-items-center mb-4 bg-white p-3 rounded-4 shadow-sm">
-          <div>
+          <div className="d-flex align-items-center">
+            <img src="/logo.png" alt="Logo I.E Peruano Japonés 7213" className="me-3" style={{height: '40px', width: 'auto'}} />
             <h4 className="mb-0 fw-bold">
               {activeModule === 'mis-clases' && 'Mis Clases'}
               {activeModule === 'mis-asistencias' && 'Mi Registro de Asistencia'}
               {activeModule === 'mis-calificaciones' && 'Mis Calificaciones'}
+              {activeModule === 'seleccionar-curso' && 'Seleccionar curso'}
+              {activeModule === 'chat' && 'Mensajería'}
+              {activeModule === 'ficha-interna' && 'Ficha interna del estudiante'}
               {!activeModule && 'Dashboard Principal'}
             </h4>
             <nav aria-label="breadcrumb">
               <ol className="breadcrumb mb-0 small">
-                <li className="breadcrumb-item"><a href="#" className="text-decoration-none">Go English</a></li>
+                <li className="breadcrumb-item text-muted">I.E Peruano Japonés 7213</li>
                 <li className="breadcrumb-item active" aria-current="page">{activeModule || 'Dashboard'}</li>
               </ol>
             </nav>
@@ -180,7 +336,7 @@ const StudentDashboard = ({
             <button className="btn btn-light rounded-circle" style={{width: '40px', height: '40px'}}>
               <FaBell />
             </button>
-            <button className="btn btn-light rounded-circle" style={{width: '40px', height: '40px'}}>
+            <button className="btn btn-light rounded-circle" style={{width: '40px', height: '40px'}} onClick={() => setActiveModule('configuracion')}>
               <FaCog />
             </button>
           </div>
@@ -216,8 +372,8 @@ const StudentDashboard = ({
                     <div className="row g-0">
                       <div className="col-md-8 p-4">
                         <h2 className="display-6 fw-bold text-primary mb-2">
-                          ¡Bienvenido, {userInfo.nombre}! 
-                          <span className="ms-2" role="img" aria-label="wave">👋</span>
+                          -íBienvenido, {userInfo.nombre}! 
+                          <span className="ms-2" role="img" aria-label="wave">­ƒæï</span>
                         </h2>
                         <p className="text-muted mb-4">
                           Accede a tus clases, revisa tus calificaciones y controla tu asistencia desde un solo lugar.
@@ -271,12 +427,12 @@ const StudentDashboard = ({
                           
                           <div>
                             <div className="d-flex justify-content-between align-items-center mb-1">
-                              <small>Clases</small>
-                              <small className="fw-bold">{misClases.length}</small>
+                              <small>Cursos</small>
+                              <small className="fw-bold">{totalCursosInscritos}</small>
                             </div>
                             <div className="progress" style={{height: '6px'}}>
                               <div className="progress-bar bg-success" style={{
-                                width: `${Math.min(misClases.length * 10, 100)}%`
+                                width: `${Math.min(totalCursosInscritos * 10, 100)}%`
                               }}></div>
                             </div>
                           </div>
@@ -297,8 +453,8 @@ const StudentDashboard = ({
                   <div className="card-body">
                     <div className="d-flex justify-content-between align-items-center">
                       <div>
-                        <h6 className="text-muted mb-1">Clases Inscritas</h6>
-                        <h3 className="fw-bold mb-0">{misClases.length}</h3>
+                        <h6 className="text-muted mb-1">Cursos Inscritos</h6>
+                        <h3 className="fw-bold mb-0">{totalCursosInscritos}</h3>
                       </div>
                       <div className="bg-primary bg-opacity-25 rounded-4 p-3">
                         <FaBookOpen className="text-primary" size={24} />
@@ -357,6 +513,187 @@ const StudentDashboard = ({
             </div>
           )}
           
+          {/* MÓDULO: SELECCIONAR CURSO */}
+          {activeModule === 'seleccionar-curso' && !loading && (
+            <div className="card border-0 shadow-sm rounded-4">
+              <div className="card-header bg-white p-4 border-0">
+                <div className="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                  <div>
+                    <h4 className="mb-1 fw-bold d-flex align-items-center">
+                      <FaBookOpen className="text-primary me-2" />
+                      Seleccionar Curso
+                    </h4>
+                    <p className="text-muted mb-0">
+                      Gestiona los cursos en los que estás inscrito y descubre nuevas opciones disponibles.
+                    </p>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <span className="badge bg-primary-subtle text-primary rounded-pill">
+                      {totalCursosInscritos} inscritos
+                    </span>
+                    <button
+                      className="btn btn-outline-primary d-flex align-items-center gap-2"
+                      onClick={handleRefreshCursos}
+                      disabled={refreshingCursos}
+                    >
+                      {refreshingCursos ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm" role="status" />
+                          Actualizando...
+                        </>
+                      ) : (
+                        <>
+                          <FaSync />
+                          Actualizar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="card-body">
+                <div className="row g-4">
+                  <div className="col-lg-6">
+                    <h5 className="fw-semibold mb-3 d-flex align-items-center">
+                      <FaClipboardCheck className="text-success me-2" />
+                      Mis cursos inscritos
+                    </h5>
+                    {cursosInscritos.length > 0 ? (
+                      <div className="list-group">
+                        {cursosInscritos.map((curso, index) => {
+                          const cursoId = resolverCursoId(curso);
+                          const nombreCurso = resolverNombreCurso(curso);
+                          const docenteCurso = resolverDocenteCurso(curso);
+                          const horarioCurso = resolverHorarioCurso(curso);
+                          const descripcionCurso = curso?.descripcion || curso?.descripcionCurso || curso?.detalle;
+                          return (
+                            <div
+                              key={cursoId ?? index}
+                              className="list-group-item border-0 rounded-4 shadow-sm mb-3"
+                            >
+                              <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                <div>
+                                  <h6 className="fw-bold mb-1">{nombreCurso}</h6>
+                                  <p className="text-muted mb-1 small">{docenteCurso}</p>
+                                  <div className="d-flex flex-wrap gap-2">
+                                    {horarioCurso && (
+                                      <span className="badge bg-light text-secondary rounded-pill">
+                                        {horarioCurso}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {descripcionCurso && (
+                                    <p className="text-muted mb-0 small mt-2">{descripcionCurso}</p>
+                                  )}
+                                </div>
+                                <button
+                                  className="btn btn-outline-danger btn-sm d-flex align-items-center gap-2"
+                                  onClick={() => handleCancelarInscripcion(cursoId)}
+                                  disabled={droppingId === cursoId}
+                                >
+                                  {droppingId === cursoId ? (
+                                    <>
+                                      <span className="spinner-border spinner-border-sm" role="status" />
+                                      Cancelando...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FaTimes />
+                                      Cancelar
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center border rounded-4 p-4 bg-light">
+                        <FaClipboardCheck size={36} className="text-muted mb-3" />
+                        <h6 className="fw-semibold">Aún no te has inscrito en cursos</h6>
+                        <p className="text-muted mb-0">
+                          Explora las opciones disponibles y únete a tus clases favoritas.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="col-lg-6">
+                    <h5 className="fw-semibold mb-3 d-flex align-items-center">
+                      <FaPlus className="text-primary me-2" />
+                      Cursos disponibles
+                    </h5>
+                    {disponibles.length > 0 ? (
+                      <div className="list-group">
+                        {disponibles.map((curso, index) => {
+                          const cursoId = resolverCursoId(curso);
+                          const nombreCurso = resolverNombreCurso(curso);
+                          const docenteCurso = resolverDocenteCurso(curso);
+                          const horarioCurso = resolverHorarioCurso(curso);
+                          const descripcionCurso = curso?.descripcion || curso?.descripcionCurso || curso?.detalle;
+                          const cuposCurso = resolverCuposDisponibles(curso);
+                          return (
+                            <div
+                              key={cursoId ?? index}
+                              className="list-group-item border-0 rounded-4 shadow-sm mb-3"
+                            >
+                              <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                <div>
+                                  <h6 className="fw-bold mb-1">{nombreCurso}</h6>
+                                  <p className="text-muted mb-1 small">{docenteCurso}</p>
+                                  <div className="d-flex flex-wrap gap-2">
+                                    {horarioCurso && (
+                                      <span className="badge bg-primary-subtle text-primary rounded-pill">
+                                        {horarioCurso}
+                                      </span>
+                                    )}
+                                    {cuposCurso != null && (
+                                      <span className="badge bg-success-subtle text-success rounded-pill">
+                                        {cuposCurso} cupos disponibles
+                                      </span>
+                                    )}
+                                  </div>
+                                  {descripcionCurso && (
+                                    <p className="text-muted mb-0 small mt-2">{descripcionCurso}</p>
+                                  )}
+                                </div>
+                                <button
+                                  className="btn btn-primary btn-sm d-flex align-items-center gap-2"
+                                  onClick={() => handleInscribirse(cursoId)}
+                                  disabled={enrollingId === cursoId || droppingId === cursoId}
+                                >
+                                  {enrollingId === cursoId ? (
+                                    <>
+                                      <span className="spinner-border spinner-border-sm" role="status" />
+                                      Inscribiendo...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FaPlus />
+                                      Inscribirme
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center border rounded-4 p-4 bg-light">
+                        <FaBookOpen size={36} className="text-muted mb-3" />
+                        <h6 className="fw-semibold">No hay cursos disponibles por ahora</h6>
+                        <p className="text-muted mb-0">
+                          Vuelve a intentarlo más tarde o solicita apoyo a administración.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* MÓDULO: MIS CLASES */}
           {activeModule === 'mis-clases' && !loading && (
             <div className="card border-0 shadow-sm rounded-4">
@@ -366,20 +703,71 @@ const StudentDashboard = ({
                     <FaBookOpen className="text-primary me-2" /> 
                     Mis Clases
                   </h4>
-                  <span className="badge bg-primary rounded-pill">{misClases.length} clases</span>
+                  <span className="badge bg-primary rounded-pill">{totalCursosInscritos} cursos</span>
                 </div>
               </div>
               <div className="card-body">
-                {misClases.length > 0 ? (
-                  <ClasesList
-                    clases={misClases}
-                    token={token}
-                    onClaseClick={(clase) => {
-                      console.log('Clase seleccionada:', clase);
-                    }}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
+                {cursosInscritos.length > 0 ? (
+                  <div className="row g-4">
+                    {cursosInscritos.map((curso, index) => {
+                      const cursoId = resolverCursoId(curso);
+                      const nombreCurso = resolverNombreCurso(curso);
+                      const docenteCurso = resolverDocenteCurso(curso);
+                      const horarioCurso = resolverHorarioCurso(curso);
+                      const aulaCurso = curso.aula ?? curso.aulaCurso ?? '';
+                      const descripcionCurso = curso?.descripcion || curso?.descripcionCurso || curso?.detalle;
+                      return (
+                        <div key={cursoId ?? index} className="col-md-6 col-lg-4">
+                          <div className="card border-0 shadow-sm rounded-4 h-100">
+                            <div className="card-body">
+                              <h5 className="fw-bold mb-2 text-primary">{nombreCurso}</h5>
+                              <p className="text-muted mb-1 small"><strong>Docente:</strong> {docenteCurso}</p>
+                              <div className="d-flex flex-wrap gap-2 mb-2">
+                                {horarioCurso && (
+                                  <span className="badge bg-light text-secondary rounded-pill">
+                                    {horarioCurso}
+                                  </span>
+                                )}
+                                {aulaCurso && (
+                                  <span className="badge bg-info-subtle text-info rounded-pill">
+                                    Aula: {aulaCurso}
+                                  </span>
+                                )}
+                                {/* Estado del curso: activo/inactivo */}
+                                {curso.fecha_inicio && curso.fecha_fin && (
+                                  (() => {
+                                    const inicio = new Date(curso.fecha_inicio);
+                                    const fin = new Date(curso.fecha_fin);
+                                    const hoy = new Date();
+                                    const activo = hoy >= inicio && hoy <= fin;
+                                    return (
+                                      <span className={`badge rounded-pill ${activo ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}`}>
+                                        {activo ? 'Activo' : 'Inactivo'}
+                                      </span>
+                                    );
+                                  })()
+                                )}
+                              </div>
+                              {/* Fechas de inicio y fin */}
+                              {curso.fecha_inicio && (
+                                <p className="text-muted mb-0 small">Inicio: {new Date(curso.fecha_inicio).toLocaleDateString()}</p>
+                              )}
+                              {curso.fecha_fin && (
+                                <p className="text-muted mb-0 small">Fin: {new Date(curso.fecha_fin).toLocaleDateString()}</p>
+                              )}
+                              {/* Estado del aula */}
+                              <p className="text-muted mb-0 small">
+                                Estado aula: <span className="fw-bold">{aulaCurso ? aulaCurso : 'Sin aula'}</span>
+                              </p>
+                              {descripcionCurso && (
+                                <p className="text-muted mb-0 small mt-2">{descripcionCurso}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <div className="text-center py-5">
                     <div className="mb-3">
@@ -387,8 +775,8 @@ const StudentDashboard = ({
                         <FaBookOpen size={50} className="text-muted" />
                       </div>
                     </div>
-                    <h5>No estás inscrito en ninguna clase</h5>
-                    <p className="text-muted">Contacta con administración para inscribirte en clases</p>
+                    <h5>No estás inscrito en ningún curso</h5>
+                    <p className="text-muted">Contacta con administración para inscribirte en cursos</p>
                   </div>
                 )}
               </div>
@@ -438,7 +826,7 @@ const StudentDashboard = ({
                                   ? 'bg-success-subtle text-success' 
                                   : 'bg-danger-subtle text-danger'
                               } px-3 py-2 rounded-pill`}>
-                                {asistencia.presente ? '✓ Presente' : '✗ Ausente'}
+                                {asistencia.presente ? 'Ô£ô Presente' : 'Ô£ù Ausente'}
                               </span>
                             </td>
                           </tr>
@@ -528,6 +916,33 @@ const StudentDashboard = ({
               </div>
             </div>
           )}
+
+        {activeModule === 'ficha-interna' && !loading && (
+          <StudentInternalForm showError={showError} showSuccess={showSuccess} />
+        )}
+
+        {activeModule === 'chat' && !loading && (
+          <div className="card border-0 shadow-sm rounded-4">
+            <div className="card-body p-0">
+              <Chat user={userInfo} token={token} />
+            </div>
+          </div>
+        )}
+
+        {activeModule === 'configuracion' && !loading && (
+          <div className="card border-0 shadow-sm rounded-4">
+            <div className="card-body p-0">
+              <Configuracion
+                userInfo={userInfo}
+                darkMode={isDark}
+                toggleTheme={toggleTheme}
+                token={token}
+                showError={showError}
+                showSuccess={showSuccess}
+              />
+            </div>
+          </div>
+        )}
         </div>
       </main>
     </div>

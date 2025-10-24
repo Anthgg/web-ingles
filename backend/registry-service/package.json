@@ -1,0 +1,20 @@
+{
+  "name": "registry-service",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "test": "node ../run/service-smoke.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Servicio para gestionar formularios institucionales y fichas internas",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv-flow": "^4.1.0",
+    "envalid": "^7.3.1",
+    "@campus/base-middleware": "file:../base-middleware"
+  }
+}

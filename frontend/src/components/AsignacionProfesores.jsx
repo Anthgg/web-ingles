@@ -1,49 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FaCalendarAlt, 
-  FaTrash, 
-  FaEdit, 
-  FaPlus, 
-  FaSave, 
-  FaTimes, 
-  FaUser, 
-  FaBook, 
-  FaClock, 
-  FaMapMarkerAlt, 
-  FaUsers, 
-  FaChalkboardTeacher, 
+// ...existing code...
+import {
+  FaCalendarAlt,
+  FaPlus,
+  FaSave,
+  FaTimes,
+  FaUser,
+  FaBook,
+  FaClock,
+  FaMapMarkerAlt,
+  FaUsers,
+  FaChalkboardTeacher,
   FaClipboardList,
   FaCheckCircle,
   FaExclamationTriangle,
-  FaUndo 
+  FaUndo,
+  FaSchool,
 } from 'react-icons/fa';
 
 const diasSemana = [
   'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
 ];
 
-function getFechasEntreDias(fechaInicio, fechaFin, diaSemana) {
-  const fechas = [];
-  const dias = {
-    'Domingo': 0, 'Lunes': 1, 'Martes': 2, 'Miércoles': 3,
-    'Jueves': 4, 'Viernes': 5, 'Sábado': 6
-  };
-  let actual = new Date(fechaInicio);
-  const fin = new Date(fechaFin);
-  actual.setHours(0,0,0,0);
-  fin.setHours(0,0,0,0);
-
-  // Buscar el primer día correcto
-  while (actual.getDay() !== dias[diaSemana]) {
-    actual.setDate(actual.getDate() + 1);
-  }
-  // Agregar todos los días correctos
-  while (actual <= fin) {
-    fechas.push(new Date(actual));
-    actual.setDate(actual.getDate() + 7);
-  }
-  return fechas;
-}
+const nivelesAcademicos = ['Inicial', 'Primaria', 'Secundaria'];
 
 const AsignacionProfesores = ({
   profesores = [],
@@ -52,11 +31,14 @@ const AsignacionProfesores = ({
   fetchAsignaciones,
   token,
   showError,
-  showSuccess
+  showSuccess,
 }) => {
   const [form, setForm] = useState({
     profesor: '',
     curso: '',
+    nivel: '',
+    grado: '',
+    seccion: '',
     dia: '',
     horaInicio: '',
     horaFin: '',
@@ -86,6 +68,15 @@ const AsignacionProfesores = ({
     const e = {};
     if (!f.profesor) e.profesor = 'Seleccione un profesor';
     if (!f.curso) e.curso = 'Seleccione un curso';
+    if (!f.nivel) e.nivel = 'Seleccione un nivel';
+    if (!f.grado) {
+      e.grado = 'Ingrese el grado';
+    } else if (Number.isNaN(Number(f.grado)) || Number(f.grado) <= 0) {
+      e.grado = 'Ingrese un grado válido';
+    }
+    if (!f.seccion || !String(f.seccion).trim()) {
+      e.seccion = 'Ingrese la sección';
+    }
     if (!f.dia) e.dia = 'Seleccione un día';
     if (!f.horaInicio) e.horaInicio = 'Ingrese la hora de inicio';
     if (!f.horaFin) e.horaFin = 'Ingrese la hora de fin';
@@ -114,7 +105,8 @@ const AsignacionProfesores = ({
 
   const handleChange = e => {
     const { name, value } = e.target;
-    const newForm = { ...form, [name]: value };
+    const normalizedValue = name === 'seccion' ? value.toUpperCase() : value;
+    const newForm = { ...form, [name]: normalizedValue };
     setForm(newForm);
     
     // Validar en tiempo real
@@ -124,61 +116,58 @@ const AsignacionProfesores = ({
 
   const handleSubmit = async e => {
     e.preventDefault();
-    
-    // Validar formulario
+
     const eValid = validar();
-    setErrores(eValid);
     if (Object.keys(eValid).length > 0) {
-      setMensaje('Por favor corrija los errores en el formulario');
+      setErrores(eValid);
+      const primerError = Object.values(eValid)[0];
+      if (primerError && showError) {
+        showError(primerError);
+      }
       return;
     }
 
+    setErrores({});
     setLoading(true);
     setMensaje('');
-    
+
+    const profesorSeleccionado = (Array.isArray(profesores) ? profesores : []).find(
+      (p) => String(p.id) === String(form.profesor)
+    );
+    const cursoSeleccionado = (Array.isArray(cursos) ? cursos : []).find(
+      (c) => String(c.id) === String(form.curso)
+    );
+
+    const body = {
+      profesorId: Number(form.profesor),
+      cursoId: form.curso ? Number(form.curso) : null,
+      profesorNombre: profesorSeleccionado?.nombre || '',
+      cursoNombre: cursoSeleccionado?.nombre || '',
+      level: form.nivel,
+      grade_number: Number(form.grado),
+      section: form.seccion?.trim().toUpperCase(),
+      diaSemana: form.dia,
+      horaInicio: form.horaInicio,
+      horaFin: form.horaFin,
+      fechaInicio: form.fechaInicio,
+      fechaFin: form.fechaFin,
+      aula: form.aula,
+      notas: form.notas,
+      maxAlumnos: Number(form.maxAlumnos),
+    };
+
     try {
-      // Preparar datos para enviar
-      const profesorSeleccionado = profesores.find(p => String(p.id) === String(form.profesor));
-      const cursoSeleccionado = cursos.find(c => String(c.id) === String(form.curso));
-
-      if (!profesorSeleccionado) {
-        throw new Error('Profesor no encontrado');
-      }
-      if (!cursoSeleccionado) {
-        throw new Error('Curso no encontrado');
-      }
-
-      const body = {
-        profesorId: parseInt(form.profesor),
-        profesorNombre: profesorSeleccionado.nombre,
-        cursoId: parseInt(form.curso),
-        cursoNombre: cursoSeleccionado.nombre,
-        diaSemana: form.dia,
-        horaInicio: form.horaInicio,
-        horaFin: form.horaFin,
-        fechaInicio: form.fechaInicio,
-        fechaFin: form.fechaFin,
-        aula: form.aula.trim(),
-        notas: form.notas.trim(),
-        maxAlumnos: parseInt(form.maxAlumnos)
-      };
-
-      let url = 'http://localhost:3007/asignaciones';
-      let method = 'POST';
-      
-      // Si estamos editando, usar PUT y agregar el ID
-      if (editIndex !== null && editId) {
-        url = `http://localhost:3007/asignaciones/${editId}`;
-        method = 'PUT';
-      }
+  const baseUrl = 'http://localhost:3007/asignaciones';
+      const url = editId ? `${baseUrl}/${editId}` : baseUrl;
+      const method = editId ? 'PUT' : 'POST';
 
       const res = await fetch(url, {
-        method: method,
-        headers: { 
+        method,
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : ''
+          Authorization: token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -186,112 +175,38 @@ const AsignacionProfesores = ({
         throw new Error(errorData.error || errorData.message || `Error HTTP ${res.status}: ${res.statusText}`);
       }
 
-      const data = await res.json();
-
-      // Mostrar datos del registro recién creado o editado
-      setUltimoRegistro({
-        ...body,
-        id: data.id || editId,
+      const data = await res.json().catch(() => ({}));
+      const registro = {
+        id: data.id || data.insertId || editId,
         profesor_nombre: body.profesorNombre,
         curso_nombre: body.cursoNombre,
-      });
+        nivel: body.level,
+        grado: body.grade_number,
+        seccion: body.section,
+        diaSemana: body.diaSemana,
+        horaInicio: body.horaInicio,
+        horaFin: body.horaFin,
+        fechaInicio: body.fechaInicio,
+        fechaFin: body.fechaFin,
+        aula: body.aula,
+        notas: body.notas,
+        maxAlumnos: body.maxAlumnos,
+      };
+
+      setUltimoRegistro(registro);
 
       const mensajeExito = editIndex !== null ? 'Asignación actualizada exitosamente' : 'Asignación creada exitosamente';
       setMensaje(mensajeExito);
       showSuccess && showSuccess(mensajeExito);
 
-      // Recargar asignaciones
       if (fetchAsignaciones) {
         await fetchAsignaciones();
       }
 
-      // Limpiar formulario
       handleReset();
-
     } catch (err) {
       console.error('Error en handleSubmit:', err);
       const mensajeError = err.message || 'Error de conexión con el servidor';
-      setMensaje(mensajeError);
-      showError && showError(mensajeError);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEdit = (idx) => {
-    if (idx < 0 || idx >= asignaciones.length) {
-      showError && showError('Asignación no válida');
-      return;
-    }
-
-    const a = asignaciones[idx];
-    
-    // Buscar IDs de profesor y curso
-    const profesorId = a.profesor_id || profesores.find(p => p.nombre === (a.profesor_nombre || a.profesor))?.id || '';
-    const cursoId = a.curso_id || cursos.find(c => c.nombre === (a.curso_nombre || a.curso))?.id || '';
-
-    setForm({
-      profesor: String(profesorId),
-      curso: String(cursoId),
-      dia: a.dia_semana || a.dia || '',
-      horaInicio: a.hora_inicio || a.horaInicio || '',
-      horaFin: a.hora_fin || a.horaFin || '',
-      fechaInicio: a.fecha_inicio || a.fechaInicio || '',
-      fechaFin: a.fecha_fin || a.fechaFin || '',
-      aula: a.aula || '',
-      notas: a.notas || '',
-      maxAlumnos: String(a.max_alumnos || a.maxAlumnos || '')
-    });
-    
-    setEditIndex(idx);
-    setEditId(a.id);
-    setErrores({});
-    setMensaje('');
-  };
-
-  const handleDelete = async (idx) => {
-    if (idx < 0 || idx >= asignaciones.length) {
-      showError && showError('Asignación no válida');
-      return;
-    }
-
-    const asignacion = asignaciones[idx];
-    
-    if (!asignacion.id) {
-      showError && showError('ID de asignación no válido');
-      return;
-    }
-
-    if (!window.confirm('¿Está seguro de que desea eliminar esta asignación?')) return;
-    
-    setLoading(true);
-    setMensaje('');
-    
-    try {
-      const res = await fetch(`http://localhost:3006/asignaciones/${asignacion.id}`, { 
-        method: 'DELETE',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : ''
-        }
-      });
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.message || `Error HTTP ${res.status}: ${res.statusText}`);
-      }
-      
-      const mensajeExito = 'Asignación eliminada exitosamente';
-      setMensaje(mensajeExito);
-      showSuccess && showSuccess(mensajeExito);
-      
-      // Recargar asignaciones
-      if (fetchAsignaciones) {
-        await fetchAsignaciones();
-      }
-      
-    } catch (err) {
-      console.error('Error en handleDelete:', err);
-      const mensajeError = err.message || 'Error de conexión al eliminar';
       setMensaje(mensajeError);
       showError && showError(mensajeError);
     } finally {
@@ -303,6 +218,9 @@ const AsignacionProfesores = ({
     setForm({
       profesor: '',
       curso: '',
+      nivel: '',
+      grado: '',
+      seccion: '',
       dia: '',
       horaInicio: '',
       horaFin: '',
@@ -323,8 +241,15 @@ const AsignacionProfesores = ({
   };
 
   // Componente para mostrar la última asignación con diseño más integrado
-  const UltimaAsignacionCard = ({ registro, onClose }) => (
-    <div className="mt-4 bg-white border rounded-3 shadow-sm overflow-hidden">
+  const UltimaAsignacionCard = ({ registro, onClose }) => {
+    const gradoDetalle = [
+      registro.nivel,
+      registro.grado ? `Grado ${registro.grado}` : null,
+      registro.seccion ? `Sección ${registro.seccion}` : null,
+    ].filter(Boolean).join(' • ') || 'No definido';
+
+    return (
+      <div className="mt-4 bg-white border rounded-3 shadow-sm overflow-hidden">
       <div className="bg-success bg-gradient bg-opacity-10 p-3 border-bottom">
         <div className="d-flex justify-content-between align-items-center">
           <div className="d-flex align-items-center gap-2">
@@ -369,7 +294,7 @@ const AsignacionProfesores = ({
         </div>
         
         <div className="row g-3">
-          <div className="col-md-4">
+          <div className="col-md-3">
             <div className="d-flex align-items-center gap-2">
               <div className="bg-warning bg-opacity-10 p-1 rounded">
                 <FaClock className="text-warning" size={14} />
@@ -380,7 +305,7 @@ const AsignacionProfesores = ({
               </div>
             </div>
           </div>
-          <div className="col-md-4">
+          <div className="col-md-3">
             <div className="d-flex align-items-center gap-2">
               <div className="bg-danger bg-opacity-10 p-1 rounded">
                 <FaMapMarkerAlt className="text-danger" size={14} />
@@ -391,7 +316,18 @@ const AsignacionProfesores = ({
               </div>
             </div>
           </div>
-          <div className="col-md-4">
+          <div className="col-md-3">
+            <div className="d-flex align-items-center gap-2">
+              <div className="bg-info bg-opacity-10 p-1 rounded">
+                <FaSchool className="text-info" size={14} />
+              </div>
+              <div>
+                <div className="fw-semibold small">Grado y Sección</div>
+                <span className="small">{gradoDetalle}</span>
+              </div>
+            </div>
+          </div>
+          <div className="col-md-3">
             <div className="d-flex align-items-center gap-2">
               <div className="bg-primary bg-opacity-10 p-1 rounded">
                 <FaUsers className="text-primary" size={14} />
@@ -422,6 +358,7 @@ const AsignacionProfesores = ({
       </div>
     </div>
   );
+  };
 
   // Modifica fetchAsignaciones para limpiar ultimoRegistro si no hay asignaciones
   useEffect(() => {
@@ -466,7 +403,7 @@ const AsignacionProfesores = ({
                   Información del Profesor y Curso
                 </h6>
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label fw-semibold">Profesor *</label>
                 <div className="input-group">
                   <span className="input-group-text bg-light">
@@ -480,7 +417,7 @@ const AsignacionProfesores = ({
                     disabled={loading}
                   >
                     <option value="">Seleccione un profesor...</option>
-                    {profesores.map((p) => (
+                    {(Array.isArray(profesores) ? profesores : []).map((p) => (
                       <option key={p.id} value={p.id}>{p.nombre}</option>
                     ))}
                   </select>
@@ -488,7 +425,7 @@ const AsignacionProfesores = ({
                 </div>
               </div>
               
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label fw-semibold">Curso/Materia *</label>
                 <div className="input-group">
                   <span className="input-group-text bg-light">
@@ -502,11 +439,70 @@ const AsignacionProfesores = ({
                     disabled={loading}
                   >
                     <option value="">Seleccione un curso...</option>
-                    {cursos.map((c) => (
+                    {(Array.isArray(cursos) ? cursos : []).map((c) => (
                       <option key={c.id} value={c.id}>{c.nombre}</option>
                     ))}
                   </select>
                   {errores.curso && <div className="invalid-feedback">{errores.curso}</div>}
+                </div>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label fw-semibold">Nivel Académico *</label>
+                <div className="input-group">
+                  <span className="input-group-text bg-light">
+                    <FaSchool size={16} />
+                  </span>
+                  <select
+                    className={`form-select ${errores.nivel ? 'is-invalid' : ''}`}
+                    name="nivel"
+                    value={form.nivel}
+                    onChange={handleChange}
+                    disabled={loading}
+                  >
+                    <option value="">Seleccione nivel...</option>
+                    {nivelesAcademicos.map((nivel) => (
+                      <option key={nivel} value={nivel}>{nivel}</option>
+                    ))}
+                  </select>
+                  {errores.nivel && <div className="invalid-feedback">{errores.nivel}</div>}
+                </div>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label fw-semibold">Grado *</label>
+                <div className="input-group">
+                  <span className="input-group-text bg-light">
+                    <FaClipboardList size={16} />
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    className={`form-control ${errores.grado ? 'is-invalid' : ''}`}
+                    name="grado"
+                    value={form.grado}
+                    onChange={handleChange}
+                    placeholder="Ej: 3"
+                    disabled={loading}
+                  />
+                  {errores.grado && <div className="invalid-feedback">{errores.grado}</div>}
+                </div>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label fw-semibold">Sección *</label>
+                <div className="input-group">
+                  <span className="input-group-text bg-light">
+                    <FaUsers size={16} />
+                  </span>
+                  <input
+                    type="text"
+                    className={`form-control ${errores.seccion ? 'is-invalid' : ''}`}
+                    name="seccion"
+                    value={form.seccion}
+                    onChange={handleChange}
+                    placeholder="Ej: A"
+                    maxLength={3}
+                    disabled={loading}
+                  />
+                  {errores.seccion && <div className="invalid-feedback">{errores.seccion}</div>}
                 </div>
               </div>
             </div>

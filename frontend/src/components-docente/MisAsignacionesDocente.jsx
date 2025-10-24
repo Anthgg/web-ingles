@@ -1,14 +1,25 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  FaBook, FaCalendarAlt, FaClock, FaMapMarkerAlt, 
-  FaUsers, FaChalkboardTeacher, FaRegBell, FaFilter,
-  FaCalendarDay, FaChevronRight, FaInfoCircle, FaRegClock,
-  FaCalendarCheck, FaLayerGroup, FaStream, FaGraduationCap,
-  FaSyncAlt, FaSearchPlus, FaAngleDown, FaBuilding,
-  FaMoon, FaSun, FaRegLightbulb, FaCircle
+import {
+  FaBook,
+  FaCalendarAlt,
+  FaClock,
+  FaMapMarkerAlt,
+  FaUsers,
+  FaRegBell,
+  FaCalendarDay,
+  FaChevronRight,
+  FaInfoCircle,
+  FaRegClock,
+  FaCalendarCheck,
+  FaLayerGroup,
+  FaStream,
+  FaSyncAlt,
+  FaBuilding,
+  FaMoon,
+  FaSun,
 } from 'react-icons/fa';
+import { Button } from 'react-bootstrap';
 import axios from 'axios';
-import { Card, Badge, Row, Col, Alert, Button, Spinner, ProgressBar } from 'react-bootstrap';
 
 const MisAsignacionesDocente = ({   
   asignaciones: initialAsignaciones,
@@ -215,9 +226,6 @@ const MisAsignacionesDocente = ({
 
   // Clases CSS basadas en el modo oscuro/claro
   const themeClass = modoOscuro ? 'dark-theme' : 'light-theme';
-  const bgClass = modoOscuro ? 'bg-dark text-light' : 'bg-light text-dark';
-  const cardClass = modoOscuro ? 'bg-dark-card text-light' : 'bg-white';
-  const borderClass = modoOscuro ? 'border-dark' : 'border-light';
   
   // Colores del tema
   const themeColors = {
@@ -238,12 +246,10 @@ const MisAsignacionesDocente = ({
         <div className="schedule-sidebar">
           <div className="sidebar-header">
             <div className="app-logo">
-              <div className="logo-icon">
-                <FaChalkboardTeacher size={28} />
-              </div>
+              <img src="/logo/image.png" alt="Logo I.E Peruano Japonés 7213" style={{height: '50px', width: 'auto', marginRight: '12px'}} />
               <div className="logo-text">
-                <h1>GoEnglish</h1>
-                <span>Docente</span>
+                 <h1>I.E Peruano Japonés</h1>
+                <span>7213</span>
               </div>
             </div>
           </div>
@@ -634,7 +640,7 @@ const MisAsignacionesDocente = ({
       </div>
 
       {/* Estilos CSS integrados */}
-      <style jsx="true">{`
+  <style>{`
         /* Estilos base */
         :root {
           --primary-color: ${themeColors.primary};

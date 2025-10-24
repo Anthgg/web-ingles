@@ -1,13 +1,49 @@
 import React, { useState } from 'react';
-import { Button, Modal, Form, Card, Container, Row, Col, Badge } from 'react-bootstrap';
-import { FaEdit, FaTrash, FaPlus, FaUser, FaEnvelope, FaUserTag, FaUserGraduate } from 'react-icons/fa';
+import DatosPersonalesUsuario from './DatosPersonalesUsuario';
+import NotificacionDatosPersonales from './NotificacionDatosPersonales';
+import ConfirmDialog from './ui/ConfirmDialog';
+import { Alert, Button, Modal, Form, Card, Container, Row, Col, Badge } from 'react-bootstrap';
+import { FaEdit, FaTrash, FaPlus, FaUser, FaEnvelope, FaUserTag, FaUserGraduate, FaExclamationTriangle } from 'react-icons/fa';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
 const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }) => {
+  const [usuarioDatosId, setUsuarioDatosId] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ nombre: '', email: '', password: '', rol: 'estudiante' });
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pendingPersonalUser, setPendingPersonalUser] = useState(null);
+  const [personalDataCompleted, setPersonalDataCompleted] = useState(false);
+  const [personalAlertUser, setPersonalAlertUser] = useState(null);
+  const itemsPerPage = 9;
+
+  // Filtered and paginated users
+  const filteredUsuarios = usuarios.filter(usuario => {
+    const matchesSearch = usuario.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         usuario.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRole = roleFilter === '' || usuario.rol === roleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  const totalPages = Math.ceil(filteredUsuarios.length / itemsPerPage);
+  const paginatedUsuarios = filteredUsuarios.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+  };
+
+  const handleFilterChange = () => {
+    setCurrentPage(1); // Reset to first page when filtering
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -36,12 +72,32 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
         },
         body: JSON.stringify(body)
       });
-      
-      if (!res.ok) throw new Error(editMode ? 'Error al actualizar usuario' : 'Error al crear usuario');
-      
+
+      let responseData = null;
+      try {
+        responseData = await res.json();
+      } catch (parseError) {
+        responseData = null;
+      }
+
+      if (!res.ok) {
+        const message = responseData?.error || (editMode ? 'Error al actualizar usuario' : 'Error al crear usuario');
+        throw new Error(message);
+      }
+
       showSuccess(editMode ? 'Usuario actualizado correctamente' : 'Usuario creado correctamente');
-      fetchUsuarios();
       setShowModal(false);
+
+      if (!editMode && responseData?.id) {
+        setPendingPersonalUser(responseData);
+        setPersonalDataCompleted(false);
+        setPersonalAlertUser(responseData);
+        setUsuarioDatosId(responseData.id);
+      }
+
+      if (typeof fetchUsuarios === 'function') {
+        await Promise.resolve(fetchUsuarios());
+      }
     } catch (err) {
       showError(err.message);
     } finally {
@@ -50,8 +106,6 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar este usuario?')) return;
-    
     try {
       const res = await fetch(`http://localhost:3002/usuarios/${id}`, {
         method: 'DELETE',
@@ -64,6 +118,40 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
       fetchUsuarios();
     } catch (err) {
       showError(err.message);
+    }
+  };
+
+  const handleDeleteClick = (usuario) => {
+    setUserToDelete(usuario);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = () => {
+    if (userToDelete) {
+      handleDelete(userToDelete.id);
+      setUserToDelete(null);
+    }
+  };
+
+  const handleClosePersonalModal = () => {
+    if (pendingPersonalUser?.id) {
+      setUsuarioDatosId(pendingPersonalUser.id);
+    }
+    if (!personalDataCompleted && pendingPersonalUser) {
+      setPersonalAlertUser(pendingPersonalUser);
+      showError && showError(`Faltan datos personales para ${pendingPersonalUser.nombre}`);
+    }
+    setPendingPersonalUser(null);
+    setPersonalDataCompleted(false);
+  };
+
+  const handlePersonalCompleted = () => {
+    setPersonalDataCompleted(true);
+    setPendingPersonalUser(null);
+    setPersonalAlertUser(null);
+    setUsuarioDatosId(null);
+    if (typeof fetchUsuarios === 'function') {
+      fetchUsuarios();
     }
   };
 
@@ -83,6 +171,35 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
     setFormData({ nombre: '', email: '', password: '', rol: 'estudiante' });
     setEditMode(false);
     setShowModal(true);
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloading(true);
+    try {
+      const response = await fetch('http://localhost:3002/api/users/report.pdf', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error('No se pudo generar el reporte PDF');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `reporte-usuarios-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      showSuccess && showSuccess('Reporte descargado');
+    } catch (error) {
+      showError && showError(error.message || 'Error al descargar el reporte');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const getRoleBadgeVariant = (role) => {
@@ -105,7 +222,7 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
 
   return (
     <Container fluid className="py-4">
-      <style jsx>{`
+  <style>{`
         .user-card {
           transition: all 0.3s ease;
           border: none;
@@ -182,6 +299,11 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white;
         }
+
+        .modal-header-warning {
+          background: linear-gradient(135deg, #fbd786 0%, #f7797d 100%);
+          color: #212529;
+        }
         
         .spinner-border-sm {
           width: 1rem;
@@ -206,6 +328,33 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
         }
       `}</style>
 
+      {personalAlertUser && (
+        <Row className="mb-4">
+          <Col>
+            <Alert variant="warning" className="d-flex align-items-center justify-content-between gap-3 mb-0">
+              <div className="d-flex align-items-center gap-2">
+                <FaExclamationTriangle className="text-warning" />
+                <span>
+                  El usuario <strong>{personalAlertUser.nombre}</strong> aún no tiene datos personales registrados. Completa la ficha para evitar inconsistencias.
+                </span>
+              </div>
+              <Button
+                variant="outline-warning"
+                size="sm"
+                onClick={() => {
+                  const user = personalAlertUser;
+                  setPersonalDataCompleted(false);
+                  setPersonalAlertUser(null);
+                  setPendingPersonalUser(user);
+                }}
+              >
+                Completar ahora
+              </Button>
+            </Alert>
+          </Col>
+        </Row>
+      )}
+
       {/* Header */}
       <Row className="mb-5">
         <Col>
@@ -217,21 +366,88 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
               </h1>
               <p className="text-muted lead">Administra los usuarios del sistema educativo</p>
             </div>
-            <Button 
-              className="add-btn d-flex align-items-center"
-              size="lg"
-              onClick={handleAdd}
-            >
-              <FaPlus className="me-2" />
-              Nuevo Usuario
-            </Button>
+            <div className="d-flex align-items-center gap-3">
+              <Button
+                variant="outline-primary"
+                size="lg"
+                onClick={handleDownloadPdf}
+                disabled={downloading}
+              >
+                {downloading ? 'Generando...' : 'Reporte PDF'}
+              </Button>
+              <Button 
+                className="add-btn d-flex align-items-center"
+                size="lg"
+                onClick={handleAdd}
+              >
+                <FaPlus className="me-2" />
+                Nuevo Usuario
+              </Button>
+            </div>
           </div>
+        </Col>
+      </Row>
+
+      {/* Filters */}
+      <Row className="mb-4">
+        <Col md={6}>
+          <Form.Group>
+            <Form.Label>Buscar por nombre o email</Form.Label>
+            <Form.Control
+              type="text"
+              placeholder="Buscar usuarios..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                handleFilterChange();
+              }}
+            />
+          </Form.Group>
+        </Col>
+        <Col md={4}>
+          <Form.Group>
+            <Form.Label>Filtrar por rol</Form.Label>
+            <Form.Select
+              value={roleFilter}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                handleFilterChange();
+              }}
+            >
+              <option value="">Todos los roles</option>
+              <option value="estudiante">Estudiante</option>
+              <option value="profesor">Profesor</option>
+              <option value="administrativo">Administrativo</option>
+            </Form.Select>
+          </Form.Group>
+        </Col>
+        <Col md={2} className="d-flex align-items-end">
+          <Button
+            variant="outline-secondary"
+            onClick={() => {
+              setSearchTerm('');
+              setRoleFilter('');
+              setCurrentPage(1);
+            }}
+            className="w-100"
+          >
+            Limpiar
+          </Button>
+        </Col>
+      </Row>
+
+      {/* Results info */}
+      <Row className="mb-3">
+        <Col>
+          <small className="text-muted">
+            Mostrando {paginatedUsuarios.length} de {filteredUsuarios.length} usuarios
+          </small>
         </Col>
       </Row>
 
       {/* Cards Grid */}
       <Row className="g-4">
-        {usuarios.map((usuario, index) => (
+        {paginatedUsuarios.map((usuario, index) => (
           <Col key={usuario.id} xl={4} lg={6} md={6} sm={12}>
             <Card 
               className="user-card fade-in-card h-100"
@@ -260,13 +476,12 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
                     variant="outline-danger"
                     size="sm"
                     className="action-btn"
-                    onClick={() => handleDelete(usuario.id)}
+                    onClick={() => handleDeleteClick(usuario)}
                   >
                     <FaTrash />
                   </Button>
                 </div>
               </Card.Header>
-              
               <Card.Body>
                 <div className="mb-3 text-center">
                   <Badge 
@@ -276,7 +491,6 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
                     {getRoleIcon(usuario.rol)} {usuario.rol}
                   </Badge>
                 </div>
-                
                 <div className="d-flex align-items-center mb-2">
                   <FaEnvelope className="text-info me-3" />
                   <div className="flex-fill">
@@ -284,7 +498,18 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
                     <span className="fw-semibold">{usuario.email}</span>
                   </div>
                 </div>
-                
+                {/* Notificación si no tiene datos personales */}
+                {!usuario.datos_personales && (
+                  <NotificacionDatosPersonales onAgregar={() => setUsuarioDatosId(usuario.id)} />
+                )}
+                {/* Formulario de datos personales si se selecciona */}
+                {usuarioDatosId === usuario.id && (
+                  <DatosPersonalesUsuario
+                    usuarioId={usuario.id}
+                    onSuccess={showSuccess}
+                    onError={showError}
+                  />
+                )}
                 <div className="mt-3 pt-3 border-top">
                   <small className="text-muted">
                     Usuario activo en el sistema
@@ -295,6 +520,67 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
           </Col>
         ))}
       </Row>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <Row className="mt-4">
+          <Col className="d-flex justify-content-center">
+            <nav>
+              <ul className="pagination">
+                <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
+                  <button
+                    className="page-link"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                  >
+                    Anterior
+                  </button>
+                </li>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  <li key={page} className={`page-item ${page === currentPage ? 'active' : ''}`}>
+                    <button
+                      className="page-link"
+                      onClick={() => handlePageChange(page)}
+                    >
+                      {page}
+                    </button>
+                  </li>
+                ))}
+                <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
+                  <button
+                    className="page-link"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                  >
+                    Siguiente
+                  </button>
+                </li>
+              </ul>
+            </nav>
+          </Col>
+        </Row>
+      )}
+
+      {/* Empty State */}
+      {filteredUsuarios.length === 0 && usuarios.length > 0 && (
+        <Row className="mt-5">
+          <Col className="text-center">
+            <FaUserGraduate size={64} className="text-muted mb-3" />
+            <h4 className="text-muted">No se encontraron usuarios</h4>
+            <p className="text-muted">Intenta con otros filtros de búsqueda</p>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setSearchTerm('');
+                setRoleFilter('');
+                setCurrentPage(1);
+              }}
+            >
+              Limpiar Filtros
+            </Button>
+          </Col>
+        </Row>
+      )}
 
       {/* Empty State */}
       {usuarios.length === 0 && (
@@ -440,6 +726,48 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
           </Form>
         </Modal.Body>
       </Modal>
+
+      <Modal
+        show={!!pendingPersonalUser}
+        onHide={handleClosePersonalModal}
+        centered
+        size="lg"
+        backdrop="static"
+        keyboard={false}
+      >
+  <Modal.Header closeButton className="modal-header modal-header-warning">
+          <Modal.Title className="d-flex align-items-center gap-2">
+            <FaExclamationTriangle />
+            Datos personales obligatorios
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="p-4">
+          <p className="text-muted">
+            Para completar el alta de <strong>{pendingPersonalUser?.nombre}</strong>, registra los datos personales requeridos.
+          </p>
+          <DatosPersonalesUsuario
+            usuarioId={pendingPersonalUser?.id}
+            onSuccess={showSuccess}
+            onError={showError}
+            onCompleted={handlePersonalCompleted}
+          />
+        </Modal.Body>
+      </Modal>
+
+      {/* Confirm Delete Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        onClose={() => {
+          setShowDeleteDialog(false);
+          setUserToDelete(null);
+        }}
+        onConfirm={confirmDelete}
+        title="¿Eliminar usuario?"
+        message={`¿Estás seguro de que deseas eliminar a "${userToDelete?.nombre}"? Esta acción no se puede deshacer y se perderán todos los datos asociados.`}
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        type="danger"
+      />
     </Container>
   );
 };
