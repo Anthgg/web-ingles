@@ -242,19 +242,20 @@ app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
 
   // Datos institucionales
   doc.fontSize(16).font('Helvetica-Bold')
-     .text('Institución Educativa GoEnglish', 140, logoY + 5);
+     .text('I.E. Peruano Japonés 7213', 140, logoY + 5);
   
   doc.fontSize(10).font('Helvetica')
-     .text('RUC: 20601234567', 140, logoY + 25)
-     .text('Dirección: Av. Educación 123, Lima - Perú', 140, logoY + 40)
-     .text('Teléfono: (01) 234-5678 | Email: contacto@goenglish.edu.pe', 140, logoY + 55);
+     .text('RUC: 20503217032', 140, logoY + 25)
+     .text('Código Modular: 0588137 - UGEL 01', 140, logoY + 40)
+     .text('Dirección: Jr. Las Camelias 280, San Juan de Miraflores - Lima', 140, logoY + 55)
+     .text('Teléfono: (01) 276-3641 | Email: direccion@ie7213.edu.pe', 140, logoY + 70);
 
   // Línea separadora
-  doc.moveTo(50, logoY + 85).lineTo(545, logoY + 85).stroke();
+  doc.moveTo(50, logoY + 95).lineTo(545, logoY + 95).stroke();
 
   // Título del reporte
   doc.fontSize(18).font('Helvetica-Bold')
-     .text('REPORTE DE USUARIOS REGISTRADOS', 50, logoY + 100, { align: 'center' });
+     .text('REPORTE DE USUARIOS REGISTRADOS', 50, logoY + 110, { align: 'center' });
 
   // Información del reporte
   const now = new Date();
@@ -266,15 +267,15 @@ app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
   const hora = now.toLocaleTimeString('es-PE');
   
   doc.fontSize(9).font('Helvetica')
-     .text(`Fecha de emisión: ${fecha}`, 50, logoY + 125)
-     .text(`Hora: ${hora}`, 50, logoY + 140)
-     .text(`Total de usuarios: ${users.length}`, 50, logoY + 155);
+     .text(`Fecha de emisión: ${fecha}`, 50, logoY + 135)
+     .text(`Hora: ${hora}`, 50, logoY + 150)
+     .text(`Total de usuarios: ${users.length}`, 50, logoY + 165);
 
   // Línea separadora antes de la tabla
-  doc.moveTo(50, logoY + 175).lineTo(545, logoY + 175).stroke();
+  doc.moveTo(50, logoY + 185).lineTo(545, logoY + 185).stroke();
 
   // Tabla de usuarios
-  const tableTop = logoY + 190;
+  const tableTop = logoY + 200;
   const itemX = 50;
   const colWidths = { id: 40, nombre: 180, email: 180, rol: 85 };
 
@@ -342,7 +343,7 @@ app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
     doc.switchToPage(i);
     doc.fontSize(8).font('Helvetica')
        .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50, { align: 'center' })
-       .text('© GoEnglish - Sistema de Gestión Académica', 50, doc.page.height - 35, { align: 'center' });
+       .text('© I.E. Peruano Japonés 7213 - Sistema de Gestión Académica', 50, doc.page.height - 35, { align: 'center' });
   }
 
   doc.end();

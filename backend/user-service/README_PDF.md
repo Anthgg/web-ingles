@@ -5,12 +5,13 @@ El endpoint `/api/users/report.pdf` genera un reporte PDF con diseño profesiona
 
 ### Encabezado Institucional
 - **Logo**: Imagen del colegio (logo.png)
-- **Nombre**: Institución Educativa GoEnglish
+- **Nombre**: I.E. Peruano Japonés 7213
 - **Datos de contacto**:
-  - RUC: 20601234567
-  - Dirección: Av. Educación 123, Lima - Perú
-  - Teléfono: (01) 234-5678
-  - Email: contacto@goenglish.edu.pe
+  - RUC: 20503217032
+  - Código Modular: 0588137 - UGEL 01
+  - Dirección: Jr. Las Camelias 280, San Juan de Miraflores - Lima
+  - Teléfono: (01) 276-3641
+  - Email: direccion@ie7213.edu.pe
 
 ### Información del Reporte
 - Fecha de emisión (formato: día mes año)
@@ -44,12 +45,13 @@ Para personalizar los datos institucionales, edita las siguientes líneas en `ap
 ```javascript
 // Línea ~230
 doc.fontSize(16).font('Helvetica-Bold')
-   .text('Institución Educativa GoEnglish', 140, logoY + 5);
+   .text('I.E. Peruano Japonés 7213', 140, logoY + 5);
 
 doc.fontSize(10).font('Helvetica')
-   .text('RUC: 20601234567', 140, logoY + 25)
-   .text('Dirección: Av. Educación 123, Lima - Perú', 140, logoY + 40)
-   .text('Teléfono: (01) 234-5678 | Email: contacto@goenglish.edu.pe', 140, logoY + 55);
+   .text('RUC: 20503217032', 140, logoY + 25)
+   .text('Código Modular: 0588137 - UGEL 01', 140, logoY + 40)
+   .text('Dirección: Jr. Las Camelias 280, San Juan de Miraflores - Lima', 140, logoY + 55)
+   .text('Teléfono: (01) 276-3641 | Email: direccion@ie7213.edu.pe', 140, logoY + 70);
 ```
 
 ## Logo
