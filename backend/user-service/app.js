@@ -237,25 +237,28 @@ app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
   let logoY = 40;
   
   if (fs.existsSync(logoPath)) {
-    doc.image(logoPath, 50, logoY, { width: 80 });
+    doc.image(logoPath, 50, logoY, { width: 100, height: 100 });
   }
 
-  // Datos institucionales
-  doc.fontSize(16).font('Helvetica-Bold')
-     .text('I.E. Peruano Japonés 7213', 140, logoY + 5);
+  // Datos institucionales (ajustado para no superponerse con el logo)
+  doc.fontSize(15).font('Helvetica-Bold')
+     .text('I.E. N.º 7213 Peruano Japonés', 165, logoY + 5);
   
-  doc.fontSize(10).font('Helvetica')
-     .text('RUC: 20503217032', 140, logoY + 25)
-     .text('Código Modular: 0588137 - UGEL 01', 140, logoY + 40)
-     .text('Dirección: Jr. Las Camelias 280, San Juan de Miraflores - Lima', 140, logoY + 55)
-     .text('Teléfono: (01) 276-3641 | Email: direccion@ie7213.edu.pe', 140, logoY + 70);
+  doc.fontSize(9).font('Helvetica')
+     .text('Código Modular: 0874198 | RUC: 20503217032', 165, logoY + 25)
+     .text('Nivel: Primaria y Secundaria | Gestión: Pública', 165, logoY + 38)
+     .text('UGEL N.º 01 – San Juan de Miraflores (Lima Metropolitana)', 165, logoY + 51);
+  
+  doc.fontSize(8).font('Helvetica')
+     .text('Av. 200 Millas s/n, Urb. Pachacámac (IV Etapa / Sector 1), Villa El Salvador, Lima', 165, logoY + 64)
+     .text('Teléfono: (01) 293-4417 | Email: japones7213@hotmail.com', 165, logoY + 76);
 
   // Línea separadora
-  doc.moveTo(50, logoY + 95).lineTo(545, logoY + 95).stroke();
+  doc.moveTo(50, logoY + 105).lineTo(545, logoY + 105).stroke();
 
   // Título del reporte
   doc.fontSize(18).font('Helvetica-Bold')
-     .text('REPORTE DE USUARIOS REGISTRADOS', 50, logoY + 110, { align: 'center' });
+     .text('REPORTE DE USUARIOS REGISTRADOS', 50, logoY + 120, { align: 'center' });
 
   // Información del reporte
   const now = new Date();
@@ -267,15 +270,15 @@ app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
   const hora = now.toLocaleTimeString('es-PE');
   
   doc.fontSize(9).font('Helvetica')
-     .text(`Fecha de emisión: ${fecha}`, 50, logoY + 135)
-     .text(`Hora: ${hora}`, 50, logoY + 150)
-     .text(`Total de usuarios: ${users.length}`, 50, logoY + 165);
+     .text(`Fecha de emisión: ${fecha}`, 50, logoY + 145)
+     .text(`Hora: ${hora}`, 50, logoY + 160)
+     .text(`Total de usuarios: ${users.length}`, 50, logoY + 175);
 
   // Línea separadora antes de la tabla
-  doc.moveTo(50, logoY + 185).lineTo(545, logoY + 185).stroke();
+  doc.moveTo(50, logoY + 195).lineTo(545, logoY + 195).stroke();
 
   // Tabla de usuarios
-  const tableTop = logoY + 200;
+  const tableTop = logoY + 210;
   const itemX = 50;
   const colWidths = { id: 40, nombre: 180, email: 180, rol: 85 };
 
@@ -343,7 +346,7 @@ app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
     doc.switchToPage(i);
     doc.fontSize(8).font('Helvetica')
        .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50, { align: 'center' })
-       .text('© I.E. Peruano Japonés 7213 - Sistema de Gestión Académica', 50, doc.page.height - 35, { align: 'center' });
+       .text('© I.E. N.º 7213 Peruano Japonés - Sistema de Gestión Académica', 50, doc.page.height - 35, { align: 'center' });
   }
 
   doc.end();
