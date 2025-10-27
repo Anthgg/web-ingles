@@ -220,44 +220,129 @@ const savePersonalDataHandler = asyncHandler(async (req, res) => {
 
 // PDF report: lista de usuarios (solo admin)
 const PDFDocument = require('pdfkit');
+const path = require('path');
+const fs = require('fs');
+
 app.get('/api/users/report.pdf', ensureAdmin, asyncHandler(async (req, res) => {
   const users = await db.query('SELECT id, nombre, email, rol FROM usuarios ORDER BY id');
 
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', 'attachment; filename="usuarios-report.pdf"');
+  res.setHeader('Content-Disposition', 'attachment; filename="reporte-usuarios.pdf"');
 
-  const doc = new PDFDocument({ margin: 40, size: 'A4' });
+  const doc = new PDFDocument({ margin: 50, size: 'A4' });
   doc.pipe(res);
 
-  doc.fontSize(18).text('Reporte de Usuarios', { align: 'center' });
-  doc.moveDown(0.5);
-  doc.fontSize(10).text(`Generado: ${new Date().toLocaleString()}`);
-  doc.moveDown(1);
+  // Encabezado con logo y datos institucionales
+  const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
+  let logoY = 40;
+  
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, 50, logoY, { width: 80 });
+  }
 
-  // Table header
-  const tableTop = doc.y + 10;
-  const itemX = 40;
-  const colWidths = { id: 50, nombre: 220, email: 200, rol: 80 };
+  // Datos institucionales
+  doc.fontSize(16).font('Helvetica-Bold')
+     .text('Institución Educativa GoEnglish', 140, logoY + 5);
+  
+  doc.fontSize(10).font('Helvetica')
+     .text('RUC: 20601234567', 140, logoY + 25)
+     .text('Dirección: Av. Educación 123, Lima - Perú', 140, logoY + 40)
+     .text('Teléfono: (01) 234-5678 | Email: contacto@goenglish.edu.pe', 140, logoY + 55);
 
-  doc.font('Helvetica-Bold');
-  doc.text('ID', itemX, tableTop);
-  doc.text('Nombre', itemX + colWidths.id, tableTop);
-  doc.text('Email', itemX + colWidths.id + colWidths.nombre, tableTop);
-  doc.text('Rol', itemX + colWidths.id + colWidths.nombre + colWidths.email, tableTop);
-  doc.moveDown(0.5);
-  doc.font('Helvetica');
+  // Línea separadora
+  doc.moveTo(50, logoY + 85).lineTo(545, logoY + 85).stroke();
 
-  let y = tableTop + 20;
+  // Título del reporte
+  doc.fontSize(18).font('Helvetica-Bold')
+     .text('REPORTE DE USUARIOS REGISTRADOS', 50, logoY + 100, { align: 'center' });
+
+  // Información del reporte
+  const now = new Date();
+  const fecha = now.toLocaleDateString('es-PE', { 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
+  const hora = now.toLocaleTimeString('es-PE');
+  
+  doc.fontSize(9).font('Helvetica')
+     .text(`Fecha de emisión: ${fecha}`, 50, logoY + 125)
+     .text(`Hora: ${hora}`, 50, logoY + 140)
+     .text(`Total de usuarios: ${users.length}`, 50, logoY + 155);
+
+  // Línea separadora antes de la tabla
+  doc.moveTo(50, logoY + 175).lineTo(545, logoY + 175).stroke();
+
+  // Tabla de usuarios
+  const tableTop = logoY + 190;
+  const itemX = 50;
+  const colWidths = { id: 40, nombre: 180, email: 180, rol: 85 };
+
+  // Encabezado de tabla con fondo
+  doc.rect(itemX, tableTop, 495, 20).fillAndStroke('#2c3e50', '#2c3e50');
+  
+  doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff')
+     .text('ID', itemX + 5, tableTop + 5, { width: colWidths.id })
+     .text('NOMBRE', itemX + colWidths.id + 5, tableTop + 5, { width: colWidths.nombre })
+     .text('EMAIL', itemX + colWidths.id + colWidths.nombre + 5, tableTop + 5, { width: colWidths.email })
+     .text('ROL', itemX + colWidths.id + colWidths.nombre + colWidths.email + 5, tableTop + 5, { width: colWidths.rol });
+
+  doc.fillColor('#000000');
+
+  // Contenido de la tabla
+  let y = tableTop + 25;
+  let rowColor = true;
+
   for (const u of users) {
-    if (y > doc.page.height - 80) {
+    // Nueva página si es necesario
+    if (y > doc.page.height - 100) {
       doc.addPage();
-      y = 40;
+      y = 50;
+      
+      // Re-dibujar encabezado en nueva página
+      doc.rect(itemX, y, 495, 20).fillAndStroke('#2c3e50', '#2c3e50');
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff')
+         .text('ID', itemX + 5, y + 5, { width: colWidths.id })
+         .text('NOMBRE', itemX + colWidths.id + 5, y + 5, { width: colWidths.nombre })
+         .text('EMAIL', itemX + colWidths.id + colWidths.nombre + 5, y + 5, { width: colWidths.email })
+         .text('ROL', itemX + colWidths.id + colWidths.nombre + colWidths.email + 5, y + 5, { width: colWidths.rol });
+      doc.fillColor('#000000');
+      y += 25;
+      rowColor = true;
     }
-    doc.text(String(u.id), itemX, y);
-    doc.text(u.nombre || '-', itemX + colWidths.id, y, { width: colWidths.nombre });
-    doc.text(u.email || '-', itemX + colWidths.id + colWidths.nombre, y, { width: colWidths.email });
-    doc.text(u.rol || '-', itemX + colWidths.id + colWidths.nombre + colWidths.email, y, { width: colWidths.rol });
-    y += 18;
+
+    // Alternar color de filas
+    if (rowColor) {
+      doc.rect(itemX, y - 2, 495, 20).fill('#f8f9fa');
+    }
+    rowColor = !rowColor;
+
+    // Contenido de la fila
+    doc.fontSize(9).font('Helvetica').fillColor('#000000')
+       .text(String(u.id), itemX + 5, y + 3, { width: colWidths.id })
+       .text(u.nombre || '-', itemX + colWidths.id + 5, y + 3, { width: colWidths.nombre - 10, ellipsis: true })
+       .text(u.email || '-', itemX + colWidths.id + colWidths.nombre + 5, y + 3, { width: colWidths.email - 10, ellipsis: true });
+    
+    // Color según rol
+    const rolColors = {
+      'administrativo': '#e74c3c',
+      'profesor': '#3498db',
+      'estudiante': '#2ecc71'
+    };
+    doc.fillColor(rolColors[u.rol] || '#95a5a6')
+       .text((u.rol || '-').toUpperCase(), itemX + colWidths.id + colWidths.nombre + colWidths.email + 5, y + 3, { width: colWidths.rol });
+    
+    doc.fillColor('#000000');
+    y += 20;
+  }
+
+  // Pie de página
+  const pageCount = doc.bufferedPageRange().count;
+  for (let i = 0; i < pageCount; i++) {
+    doc.switchToPage(i);
+    doc.fontSize(8).font('Helvetica')
+       .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50, { align: 'center' })
+       .text('© GoEnglish - Sistema de Gestión Académica', 50, doc.page.height - 35, { align: 'center' });
   }
 
   doc.end();
