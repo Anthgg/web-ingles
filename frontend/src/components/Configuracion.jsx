@@ -39,9 +39,49 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
   const [otpSending, setOtpSending] = useState(false);
   const [otpCode, setOtpCode] = useState('');
 
+  // Teléfono state
+  const [userPhone, setUserPhone] = useState('');
+  const [tempPhone, setTempPhone] = useState('');
+  const [countryCode, setCountryCode] = useState('+52'); // México por defecto
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [showPhoneForm, setShowPhoneForm] = useState(false);
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [loadingPhone, setLoadingPhone] = useState(false);
+
+  // Lista de países con códigos
+  const countries = [
+    { code: '+52', name: '🇲🇽 México', flag: '🇲🇽', example: '5512345678', length: 10 },
+    { code: '+1', name: '🇺🇸 USA/Canadá', flag: '🇺🇸', example: '2025551234', length: 10 },
+    { code: '+34', name: '🇪🇸 España', flag: '🇪🇸', example: '612345678', length: 9 },
+    { code: '+54', name: '🇦🇷 Argentina', flag: '🇦🇷', example: '91123456789', length: 11 },
+    { code: '+56', name: '🇨🇱 Chile', flag: '🇨🇱', example: '912345678', length: 9 },
+    { code: '+57', name: '🇨🇴 Colombia', flag: '🇨🇴', example: '3001234567', length: 10 },
+    { code: '+51', name: '🇵🇪 Perú', flag: '🇵🇪', example: '987654321', length: 9 },
+    { code: '+58', name: '🇻🇪 Venezuela', flag: '🇻🇪', example: '4121234567', length: 10 },
+    { code: '+593', name: '🇪🇨 Ecuador', flag: '🇪🇨', example: '991234567', length: 9 },
+    { code: '+55', name: '🇧🇷 Brasil', flag: '🇧🇷', example: '11987654321', length: 11 },
+    { code: '+598', name: '🇺🇾 Uruguay', flag: '🇺🇾', example: '91234567', length: 8 },
+    { code: '+595', name: '🇵🇾 Paraguay', flag: '🇵🇾', example: '961234567', length: 9 },
+    { code: '+591', name: '🇧🇴 Bolivia', flag: '🇧🇴', example: '71234567', length: 8 },
+    { code: '+44', name: '🇬🇧 Reino Unido', flag: '🇬🇧', example: '7400123456', length: 10 },
+    { code: '+49', name: '🇩🇪 Alemania', flag: '🇩🇪', example: '15123456789', length: 11 },
+    { code: '+33', name: '🇫🇷 Francia', flag: '🇫🇷', example: '612345678', length: 9 },
+    { code: '+39', name: '🇮🇹 Italia', flag: '🇮🇹', example: '3123456789', length: 10 },
+    { code: '+351', name: '🇵🇹 Portugal', flag: '🇵🇹', example: '912345678', length: 9 },
+  ];
+
+  // Obtener el país seleccionado
+  const selectedCountry = countries.find(c => c.code === countryCode) || countries[0];
+
   // Custom colors state
   const [primaryColor, setPrimaryColor] = useState(customColors.primary);
   const [secondaryColor, setSecondaryColor] = useState(customColors.secondary);
+
+  // Sincronizar colores cuando cambien en el contexto
+  useEffect(() => {
+    setPrimaryColor(customColors.primary);
+    setSecondaryColor(customColors.secondary);
+  }, [customColors]);
 
   const hasToken = useMemo(() => Boolean(token && typeof token === 'string'), [token]);
 
@@ -76,6 +116,38 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
       }
     };
     load();
+    return () => { mounted = false; };
+  }, [callAuth, hasToken]);
+
+  // Load user phone
+  useEffect(() => {
+    let mounted = true;
+    const loadPhone = async () => {
+      if (!hasToken) return;
+      setLoadingPhone(true);
+      try {
+        const data = await callAuth('/user/phone');
+        if (mounted && data?.telefono) {
+          const phone = data.telefono;
+          setUserPhone(phone);
+          setTempPhone(phone);
+          
+          // Extraer código de país y número
+          const match = phone.match(/^(\+\d{1,4})(\d+)$/);
+          if (match) {
+            setCountryCode(match[1]);
+            setPhoneNumber(match[2]);
+          } else {
+            setPhoneNumber(phone.replace(/^\+/, ''));
+          }
+        }
+      } catch (e) {
+        console.error('Error cargando teléfono:', e);
+      } finally {
+        if (mounted) setLoadingPhone(false);
+      }
+    };
+    loadPhone();
     return () => { mounted = false; };
   }, [callAuth, hasToken]);
 
@@ -157,8 +229,43 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
     }
   };
 
+  // Save phone number
+  const handleSavePhone = async () => {
+    const number = String(phoneNumber || '').trim();
+    if (!number) {
+      return showError && showError('Ingresa tu número de teléfono');
+    }
+    if (!/^\d{6,14}$/.test(number)) {
+      return showError && showError('El número debe contener entre 6 y 14 dígitos');
+    }
+    
+    const fullPhone = countryCode + number;
+    setSavingPhone(true);
+    try {
+      await callAuth('/user/phone', {
+        method: 'PUT',
+        body: JSON.stringify({ telefono: fullPhone })
+      });
+      setUserPhone(fullPhone);
+      setTempPhone(fullPhone);
+      setShowPhoneForm(false);
+      showSuccess && showSuccess('Teléfono guardado correctamente');
+    } catch (e) {
+      showError && showError(e.message || 'No se pudo guardar el teléfono');
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
   // OTP send (SMS/Email)
   const handleSendOtp = async () => {
+    // If SMS is selected and user has no phone, show the phone form
+    if (otpChannel === 'sms' && !userPhone) {
+      setShowPhoneForm(true);
+      showError && showError('Primero debes configurar tu número de teléfono');
+      return;
+    }
+
     setOtpSending(true);
     try {
       const res = await fetch('http://localhost:3001/auth/otp/send', {
@@ -168,6 +275,11 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Si el backend dice que falta el teléfono, mostrar el formulario
+        if (data.needsPhone) {
+          setShowPhoneForm(true);
+          throw new Error(data.message || 'Configura tu número de teléfono');
+        }
         const msg = data.error || `No se pudo enviar OTP por ${otpChannel}`;
         throw new Error(msg);
       }
@@ -344,6 +456,72 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
               {otpCooldown>0 ? `Reenviar en ${otpCooldown}s` : 'Enviar código'}
             </button>
           </div>
+
+          {/* Phone Form: show if SMS selected and no phone saved */}
+          {otpChannel === 'sms' && showPhoneForm && (
+            <div className="alert alert-info mb-3">
+              <h6 className="mb-2"><FaSms className="me-2"/>Configura tu número de teléfono</h6>
+              <p className="small mb-2">Selecciona tu país e ingresa tu número (sin código de país).</p>
+              
+              <div className="row g-2 mb-2">
+                <div className="col-md-5">
+                  <label className="form-label small mb-1 fw-bold">País</label>
+                  <select 
+                    className="form-select form-select-sm"
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                  >
+                    {countries.map(country => (
+                      <option key={country.code} value={country.code}>
+                        {country.name} ({country.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-md-7">
+                  <label className="form-label small mb-1 fw-bold">Número de teléfono</label>
+                  <div className="input-group input-group-sm">
+                    <span className="input-group-text bg-primary text-white fw-bold">{countryCode}</span>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      placeholder={selectedCountry.example}
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                      maxLength="14"
+                    />
+                  </div>
+                  <div className="form-text small mt-1">
+                    <strong>Número completo:</strong> {countryCode}{phoneNumber || selectedCountry.example}
+                    <br/>
+                    <span className="text-muted">Ejemplo para {selectedCountry.name}: {countryCode}{selectedCountry.example}</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="d-flex gap-2 mt-3">
+                <button className="btn btn-primary btn-sm" onClick={handleSavePhone} disabled={savingPhone || !phoneNumber}>
+                  {savingPhone ? '⏳ Guardando...' : '💾 Guardar'}
+                </button>
+                <button className="btn btn-outline-secondary btn-sm" onClick={() => {
+                  setShowPhoneForm(false);
+                  setPhoneNumber('');
+                }}>
+                  ❌ Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Show phone status if SMS channel selected and phone exists */}
+          {otpChannel === 'sms' && !showPhoneForm && userPhone && (
+            <div className="alert alert-success d-flex align-items-center mb-3">
+              <FaCheck className="me-2"/> Teléfono configurado: <strong className="ms-1">{userPhone}</strong>
+              <button className="btn btn-link btn-sm ms-auto" onClick={() => setShowPhoneForm(true)}>
+                Cambiar
+              </button>
+            </div>
+          )}
 
           <div className="d-flex align-items-center gap-2" style={{maxWidth: 360}}>
             <CodeInput value={otpCode} onChange={setOtpCode} length={6} />

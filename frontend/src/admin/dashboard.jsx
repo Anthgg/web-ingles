@@ -8,7 +8,7 @@ import {
   FaUsers, FaBookOpen, FaAward, FaChevronDown,
   FaMoon, FaSun, FaTimes, FaExpand, FaCompress,
   FaCheck, FaChevronLeft, FaBars, FaAdjust,
-  FaFileAlt
+  FaFileAlt, FaExclamationTriangle
 } from 'react-icons/fa';
 import ProfesoresAsignaturas from '../components/ProfesoresAsignaturas';
 import AsignacionEstudiantes from '../components/AsignacionEstudiantes';
@@ -16,7 +16,8 @@ import RegistroUsuario from '../components/RegistroUsuario';
 import DatosPersonalesUsuario from '../components/DatosPersonalesUsuario';
 import SugerenciasPanel from '../components/SugerenciasPanel';
 import ReportesChart from '../components/ReportesChart';
-import Chat from '../components/Chat';
+import ReportesPanel from '../components/ReportesPanel';
+import { Chat } from '../chat';
 
 // Lazy loaded components
 const UsuariosList = lazy(() => import('../components/UsuariosList'));
@@ -25,7 +26,9 @@ const AsistenciasList = lazy(() => import('../components/AsistenciasList'));
 const CalificacionesList = lazy(() => import('../components/CalificacionesList'));
 const AsignacionProfesores = lazy(() => import('../components/AsignacionProfesores'));
 const Configuracion = lazy(() => import('../components/Configuracion'));
-const MinistryForm = lazy(() => import('../components/MinistryForm'));
+const UsuariosIncompletos = lazy(() => import('../components/UsuariosIncompletos'));
+const ControlDatosUsuario = lazy(() => import('../components/ControlDatosUsuario'));
+const PermisosPanel = lazy(() => import('../components/PermisosPanel'));
 
 const Dashboard = ({
   userInfo,
@@ -104,7 +107,9 @@ const Dashboard = ({
       category: 'Sistema',
       items: [
         { id: 'reportes', label: 'Reportes', icon: FaChartBar, module: 'reportes' },
-  { id: 'ministerio', label: 'Form. Ministerio', icon: FaFileAlt, module: 'ministerio-form' },
+        { id: 'control-datos-usuario', label: 'Control de Datos Usuario', icon: FaUser, module: 'control-datos-usuario' },
+        { id: 'usuarios-incompletos', label: 'Usuarios Incompletos', icon: FaExclamationTriangle, module: 'usuarios-incompletos' },
+        { id: 'permisos', label: 'Permisos', icon: FaUser, module: 'permisos' },
         { id: 'chat', label: 'Mensajería', icon: FaRegBell, module: 'chat' },
         { id: 'configuracion', label: 'Configuración', icon: FaCog, module: 'configuracion' },
       ]
@@ -171,7 +176,8 @@ const Dashboard = ({
       'profesores-asignaturas': 'Profesores y Asignaturas',
       'asignacion-estudiantes': 'Asignación de Estudiantes',
       'reportes': 'Reportes del Sistema',
-  'ministerio-form': 'Formulario del Ministerio',
+      'control-datos-usuario': 'Control de Datos de Usuario',
+      'usuarios-incompletos': 'Control de Datos de Usuarios',
       'configuracion': 'Configuración del Sistema',
       'chat': 'Mensajería Interna'
     };
@@ -630,11 +636,8 @@ const Dashboard = ({
           background: var(--bg-primary);
           border-bottom: 1px solid var(--border-color);
           padding: 16px 32px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-          position: sticky;
-          top: 0;
-          z-index: 100;
-          backdrop-filter: blur(12px);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+          position: static;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           animation: slideInFromTop 0.5s ease-out;
         }
@@ -651,12 +654,12 @@ const Dashboard = ({
         }
 
         .minimal-header:hover {
-          box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+          box-shadow: 0 2px 6px rgba(0,0,0,0.08);
         }
 
         .content-area {
           padding: 32px;
-          min-height: calc(100vh - 80px);
+          min-height: calc(100vh - 120px);
           animation: fadeIn 0.6s ease-out;
         }
 
@@ -1000,6 +1003,24 @@ const Dashboard = ({
               <p className="text-muted">Cargando...</p>
             </div>
           </div>
+        )}
+
+        {/* Mobile Overlay */}
+        {isMobile && mobileSidebarOpen && (
+          <div 
+            className="mobile-overlay"
+            onClick={() => setMobileSidebarOpen(false)}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 999,
+              animation: 'fadeIn 0.3s ease'
+            }}
+          />
         )}
 
         {/* Sidebar */}
@@ -1641,6 +1662,13 @@ const Dashboard = ({
                   />
                 )}
                 
+                {activeModule === 'permisos' && (
+                  <PermisosPanel 
+                    showError={showError}
+                    showSuccess={showSuccess}
+                  />
+                )}
+                
                 {activeModule === 'asignacion' && (
                   <AsignacionProfesores
                     profesores={profesores}
@@ -1673,23 +1701,44 @@ const Dashboard = ({
                 )}
                 
                 {activeModule === 'reportes' && (
-                  <ReportesChart
-                    usuarios={usuarios}
-                    clases={clases}
-                    asistencias={asistencias}
-                    calificaciones={calificaciones}
+                  <div>
+                    <ReportesPanel />
+                    <div style={{ marginTop: '30px' }}>
+                      <ReportesChart
+                        usuarios={usuarios}
+                        clases={clases}
+                        asistencias={asistencias}
+                        calificaciones={calificaciones}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeModule === 'control-datos-usuario' && (
+                  <ControlDatosUsuario
+                    token={token}
+                    showError={showError}
+                    showSuccess={showSuccess}
                   />
                 )}
 
-                {activeModule === 'ministerio-form' && (
-                  <MinistryForm
+                {activeModule === 'usuarios-incompletos' && (
+                  <UsuariosIncompletos
+                    token={token}
                     showError={showError}
                     showSuccess={showSuccess}
                   />
                 )}
                 
                 {activeModule === 'chat' && (
-                  <Chat user={userInfo} token={token} />
+                  <div style={{ 
+                    height: 'calc(100vh - 200px)', 
+                    minHeight: '500px',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    <Chat user={userInfo} token={token} />
+                  </div>
                 )}
                 </Suspense>
                 </div>

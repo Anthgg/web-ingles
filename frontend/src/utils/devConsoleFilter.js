@@ -18,10 +18,13 @@ if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'd
     try {
       const msg = args.map((a) => (typeof a === 'string' ? a : (a && a.message) || '')).join(' | ');
       const stack = (err && err.stack) || (args.find((a) => a && a.stack)?.stack) || '';
-      return (
-        (containsAny(msg, textMatches) || containsAny(stack, textMatches)) &&
-        (containsAny(source || '', suspects) || containsAny(stack, suspects) || containsAny(msg, suspects))
-      );
+      const looksLikeJsonNoise = msg.includes('[object Object]') && msg.includes('not valid JSON');
+      if (looksLikeJsonNoise) {
+        return true;
+      }
+      const suspectSource =
+        containsAny(source || '', suspects) || containsAny(stack, suspects) || containsAny(msg, suspects);
+      return (containsAny(msg, textMatches) || containsAny(stack, textMatches)) && suspectSource;
     } catch (_) {
       return false;
     }

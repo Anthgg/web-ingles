@@ -26,7 +26,7 @@ export const useDashboardData = () => {
     updateTwoFactorStatus,
   } = useAuth();
 
-  const [activeModule, setActiveModule] = useState('usuarios');
+  const [activeModule, setActiveModule] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -131,6 +131,22 @@ export const useDashboardData = () => {
       showError(err.message || 'Error al cargar asignaciones');
       if (!mountedRef.current) return [];
       setData((prev) => ({ ...prev, asignaciones: [] }));
+      return [];
+    }
+  }, [token, showError]);
+
+  const fetchAsistenciasDocente = useCallback(async (filters = {}) => {
+    if (!token) return [];
+    try {
+      const asistencias = await teacherApi.getAsistenciasDocente(filters);
+      if (!mountedRef.current) return asistencias;
+      setData((prev) => ({ ...prev, asistencias }));
+      return asistencias;
+    } catch (err) {
+      console.error('Error en fetchAsistenciasDocente:', err);
+      showError(err.message || 'Error al cargar tus asistencias');
+      if (!mountedRef.current) return [];
+      setData((prev) => ({ ...prev, asistencias: [] }));
       return [];
     }
   }, [token, showError]);
@@ -302,8 +318,11 @@ export const useDashboardData = () => {
           fetchCursosConProfesorNuevo(),
         ]);
       } else if (role === 'profesor' || role === 'docente') {
-        await fetchAsignaciones();
-        await fetchAsignacionesDocente();
+        await Promise.all([
+          fetchAsignaciones(),
+          fetchAsignacionesDocente(),
+          fetchAsistenciasDocente(),
+        ]);
       } else {
         await Promise.all([
           fetchClases(),
@@ -330,6 +349,7 @@ export const useDashboardData = () => {
     fetchEstudiantes,
     fetchCursosConProfesorNuevo,
     fetchAsignacionesDocente,
+    fetchAsistenciasDocente,
     fetchMisCursos,
     fetchCursosDisponibles,
     showError,
@@ -380,6 +400,7 @@ export const useDashboardData = () => {
     fetchClases,
     fetchAsistencias,
     fetchAsignaciones,
+    fetchAsistenciasDocente,
     fetchCalificaciones,
     fetchEstudiantes,
     fetchCursosConProfesor,

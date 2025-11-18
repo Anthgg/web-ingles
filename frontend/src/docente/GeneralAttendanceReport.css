@@ -1,0 +1,232 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap');
+
+.general-attendance-report {
+  font-family: 'Poppins', 'Inter', sans-serif;
+  background: #ffffff;
+  border-radius: 28px;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12);
+  padding: 32px;
+  margin-bottom: 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.gar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.gar-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 160px;
+}
+
+.gar-brand img {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(14, 116, 167, 0.12), rgba(14, 116, 167, 0.04));
+  padding: 10px;
+}
+
+.gar-brand-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.gar-brand-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0b3a6d;
+  letter-spacing: 0.6px;
+}
+
+.gar-brand-subtitle {
+  font-size: 12px;
+  color: #54718b;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.gar-title {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+  font-size: clamp(22px, 2.6vw, 36px);
+  font-weight: 700;
+  color: #0b3a6d;
+}
+
+.gar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gar-export-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, #0f9d58, #0b8457);
+  color: #ffffff;
+  font-weight: 600;
+  font-family: 'Poppins', 'Inter', sans-serif;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.gar-export-button svg {
+  font-size: 18px;
+}
+
+.gar-export-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(11, 132, 87, 0.28);
+}
+
+.gar-export-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.gar-table-wrapper {
+  margin-top: 24px;
+  overflow-x: auto;
+}
+
+.gar-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 880px;
+  font-family: 'Inter', sans-serif;
+}
+
+.gar-table thead tr {
+  background: #0b3a6d;
+  color: #ffffff;
+}
+
+.gar-table th,
+.gar-table td {
+  padding: 14px 18px;
+  font-size: 14px;
+  border-bottom: 1px solid #e0e6ef;
+}
+
+.gar-table th:first-child {
+  border-top-left-radius: 16px;
+}
+
+.gar-table th:last-child {
+  border-top-right-radius: 16px;
+}
+
+.gar-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 16px;
+}
+
+.gar-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 16px;
+}
+
+.gar-table tbody tr:nth-child(even) {
+  background: #f6f8fb;
+}
+
+.gar-table tbody tr:hover {
+  background: #edf2ff;
+}
+
+.gar-table th.text-left,
+.gar-table td.text-left {
+  text-align: left;
+}
+
+.gar-table th.text-center,
+.gar-table td.text-center {
+  text-align: center;
+}
+
+.highlight-100 {
+  background: #e6f8ef !important;
+}
+
+.gar-empty-state {
+  padding: 28px;
+  background: #f8fafc;
+  border-radius: 18px;
+  text-align: center;
+  color: #4b5a6b;
+  font-size: 15px;
+}
+
+.gar-footer {
+  margin-top: 24px;
+  text-align: right;
+  font-size: 13px;
+  color: #60718c;
+  font-family: 'Inter', sans-serif;
+}
+
+@media (max-width: 992px) {
+  .general-attendance-report {
+    padding: 24px;
+  }
+
+  .gar-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .gar-title {
+    text-align: left;
+    width: 100%;
+    font-size: clamp(20px, 5vw, 30px);
+  }
+
+  .gar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .gar-export-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .general-attendance-report {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .gar-brand img {
+    width: 56px;
+    height: 56px;
+  }
+
+  .gar-brand-name {
+    font-size: 16px;
+  }
+
+  .gar-table {
+    min-width: 720px;
+  }
+
+  .gar-footer {
+    text-align: left;
+  }
+}

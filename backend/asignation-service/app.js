@@ -44,7 +44,40 @@ app.use(
 );
 app.use(express.json());
 
-const SECRET_KEY = config.get('ASIGNATION_SECRET_KEY') || env.JWT_SECRET;
+let cachedJwtSecret;
+const resolveJwtSecret = () => {
+  if (cachedJwtSecret) {
+    return cachedJwtSecret;
+  }
+
+  const candidates = [
+    config.get('ASIGNATION_SECRET_KEY'),
+    env.JWT_SECRET,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : value))
+    .filter(Boolean);
+
+  const unique = [...new Set(candidates)];
+
+  if (!unique.length) {
+    throw new Error('JWT_SECRET no configurado. Define una clave compartida para todos los servicios.');
+  }
+
+  if (unique.length > 1) {
+    throw new Error('ASIGNATION_SECRET_KEY y JWT_SECRET no coinciden. Usa un solo secreto compartido.');
+  }
+
+  cachedJwtSecret = unique[0];
+  return cachedJwtSecret;
+};
+
+let SECRET_KEY;
+try {
+  SECRET_KEY = resolveJwtSecret();
+} catch (error) {
+  console.error('JWT configuration error:', error.message);
+  process.exit(1);
+}
 
 const pool = mysql.createPool({
   host: env.DB_HOST,
@@ -458,6 +491,131 @@ const broadcastAssignmentChange = (action, assignment = {}, extra = {}) => {
   }
 };
 
+const WEEKDAY_NAME_MAP = {
+  lunes: 1,
+  monday: 1,
+  martes: 2,
+  tuesday: 2,
+  miercoles: 3,
+  miércoles: 3,
+  wednesday: 3,
+  jueves: 4,
+  thursday: 4,
+  viernes: 5,
+  friday: 5,
+  sabado: 6,
+  sábado: 6,
+  saturday: 6,
+  domingo: 7,
+  sunday: 7,
+};
+
+const parseDiaSemanaValue = (value) => {
+  if (value == null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const normalized = Number(value);
+    if (normalized >= 1 && normalized <= 7) {
+      return normalized;
+    }
+  }
+
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric) && numeric >= 1 && numeric <= 7) {
+    return numeric;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized) {
+      return WEEKDAY_NAME_MAP[normalized] || null;
+    }
+  }
+
+  return null;
+};
+
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  return null;
+};
+
+const formatDateOnly = (value) => {
+  if (!(value instanceof Date)) return null;
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const buildAssignmentSessions = ({ startDate, endDate, scheduleEntries }) => {
+  const start = normalizeDateOnly(startDate);
+  const end = normalizeDateOnly(endDate);
+  if (!start || !end || start > end) {
+    return [];
+  }
+
+  const schedulesByDay = new Map();
+  (Array.isArray(scheduleEntries) ? scheduleEntries : []).forEach((entry) => {
+    if (!entry) return;
+    const weekday = parseDiaSemanaValue(entry.dia_semana);
+    if (!weekday) return;
+    const normalized = {
+      dia_semana: weekday,
+      hora_inicio: entry.hora_inicio || entry.horaInicio || null,
+      hora_fin: entry.hora_fin || entry.horaFin || null,
+      source: entry.source || 'asignacion',
+    };
+    if (!schedulesByDay.has(weekday)) {
+      schedulesByDay.set(weekday, []);
+    }
+    schedulesByDay.get(weekday).push(normalized);
+  });
+
+  if (!schedulesByDay.size) {
+    return [];
+  }
+
+  const sessions = [];
+  for (let cursor = new Date(start); cursor <= end; cursor = new Date(cursor.getTime() + MS_PER_DAY)) {
+    const weekdayMysql = cursor.getDay() === 0 ? 7 : cursor.getDay();
+    const entries = schedulesByDay.get(weekdayMysql);
+    if (!entries || !entries.length) continue;
+
+    const dateKey = formatDateOnly(cursor);
+    entries.forEach((entry) => {
+      sessions.push({
+        fecha: dateKey,
+        dia_semana: weekdayMysql,
+        hora_inicio: entry.hora_inicio || null,
+        hora_fin: entry.hora_fin || null,
+        source: entry.source || 'asignacion',
+      });
+    });
+  }
+
+  return sessions;
+};
+
 app.get(
   '/asignaciones',
   authMiddleware(['administrativo', 'profesor']),
@@ -590,6 +748,55 @@ app.get(
     }
 
     res.json(assignment);
+  })
+);
+
+app.get(
+  '/asignaciones/:id/calendario',
+  authMiddleware(['administrativo', 'profesor']),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const assignment = await fetchAssignment(id);
+
+    if (!assignment) {
+      return res.status(404).json({ error: 'Asignacion no encontrada' });
+    }
+
+    if (
+      req.user.rol === 'profesor' &&
+      assignment.profesor_id != null &&
+      Number(assignment.profesor_id) !== Number(req.user.id)
+    ) {
+      return res.status(403).json({ error: 'Permisos insuficientes' });
+    }
+
+    const scheduleEntries = [];
+    const weekday = parseDiaSemanaValue(assignment.dia_semana);
+    if (weekday) {
+      scheduleEntries.push({
+        dia_semana: weekday,
+        hora_inicio: assignment.hora_inicio || null,
+        hora_fin: assignment.hora_fin || null,
+        source: 'asignacion',
+      });
+    }
+
+    const sessions = buildAssignmentSessions({
+      startDate: assignment.fecha_inicio,
+      endDate: assignment.fecha_fin,
+      scheduleEntries,
+    });
+
+    res.json({
+      success: true,
+      data: sessions,
+      meta: {
+        asignacion_id: Number(id),
+        total: sessions.length,
+        fecha_inicio: assignment.fecha_inicio || null,
+        fecha_fin: assignment.fecha_fin || null,
+      },
+    });
   })
 );
 
@@ -999,6 +1206,53 @@ app.delete(
     broadcastAssignmentChange('student-removed', assignment, { estudiante_id: Number(estudianteId) });
 
     res.json({ message: 'Estudiante desvinculado' });
+  })
+);
+
+// Nuevo endpoint: Obtener asignaciones del profesor con estudiantes inscritos
+app.get(
+  '/asignaciones-con-estudiantes',
+  authMiddleware(['profesor', 'administrativo']),
+  asyncHandler(async (req, res) => {
+    const { profesorId } = req.query;
+    
+    // Si es profesor, solo puede ver sus propias asignaciones
+    const targetProfesorId = req.user.rol === 'profesor' ? req.user.id : (profesorId || null);
+    
+    let query = `
+      SELECT 
+        a.id AS asignacion_id,
+        a.profesor_id,
+        a.profesor_nombre,
+        a.curso_id,
+        a.curso_nombre,
+        a.dia_semana,
+        a.hora_inicio,
+        a.hora_fin,
+        a.fecha_inicio,
+        a.fecha_fin,
+        a.aula,
+        a.max_alumnos,
+        ae.estudiante_id,
+        u.nombre AS estudiante_nombre,
+        u.email AS estudiante_email,
+        ae.fecha_inscripcion
+      FROM asignaciones_profesor_curso a
+      LEFT JOIN asignacion_estudiantes ae ON ae.asignacion_id = a.id
+      LEFT JOIN ${env.AUTH_DB_NAME}.usuarios u ON u.id = ae.estudiante_id
+    `;
+    
+    const params = [];
+    if (targetProfesorId) {
+      query += ' WHERE a.profesor_id = ?';
+      params.push(targetProfesorId);
+    }
+    
+    query += ' ORDER BY a.curso_nombre, a.dia_semana, a.hora_inicio, u.nombre';
+    
+    const [rows] = await pool.execute(query, params);
+    
+    res.json({ success: true, data: rows });
   })
 );
 

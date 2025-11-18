@@ -214,3 +214,89 @@ main {
   max-width: 60ch;
   color: var(--text-secondary);
 }
+
+/* ========================================
+   RESPONSIVE THEME IMPROVEMENTS
+   ======================================== */
+
+/* Ajustes para móviles */
+@media screen and (max-width: 768px) {
+  :root {
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 2px 4px rgba(15, 23, 42, 0.06);
+    --shadow-lg: 0 4px 8px rgba(15, 23, 42, 0.08);
+    --shadow-xl: 0 8px 16px rgba(15, 23, 42, 0.1);
+    --radius-sm: 0.5rem;
+    --radius-md: 0.75rem;
+    --radius-lg: 1rem;
+  }
+
+  .section-heading {
+    gap: 0.5rem;
+  }
+
+  .section-heading__eyebrow {
+    font-size: 0.7rem;
+  }
+
+  .section-heading__title {
+    font-size: clamp(1.25rem, 5vw, 1.75rem);
+  }
+
+  .section-heading__description {
+    font-size: 0.875rem;
+    max-width: 100%;
+  }
+
+  .pill-badge {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.7rem;
+  }
+
+  .btn-theme-toggle {
+    padding: 0.35rem 0.6rem;
+  }
+}
+
+/* Mejorar legibilidad en pantallas pequeñas */
+@media screen and (max-width: 480px) {
+  body {
+    font-size: 14px;
+  }
+
+  .section-heading__title {
+    font-size: clamp(1.15rem, 5.5vw, 1.5rem);
+  }
+}
+
+/* Optimizaciones para tablets */
+@media screen and (min-width: 769px) and (max-width: 1024px) {
+  .section-heading__title {
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+  }
+}
+
+/* Reducir motion para usuarios que lo prefieren */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Ajustar contraste alto */
+:root[data-high-contrast='true'] {
+  --border-color: #000000;
+  --text-secondary: #1a1a1a;
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme='dark'][data-high-contrast='true'] {
+  --border-color: #ffffff;
+  --text-secondary: #e5e5e5;
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+}

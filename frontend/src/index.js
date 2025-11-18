@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 // Dev-only console filter for noisy extension errors
 import './utils/devConsoleFilter';
+import './tailwind.css';
+import './mobile-responsive.css';
 import App from './App';
 import { ThemeProvider } from './context/ThemeContext';
 

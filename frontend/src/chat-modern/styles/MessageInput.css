@@ -1,0 +1,551 @@
+/* ============================================
+   CONTENEDOR DE INPUT
+   ============================================ */
+
+.modern-input-container {
+  flex-shrink: 0;
+  background-color: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  position: relative;
+}
+
+/* ============================================
+   PREVIEW DE ARCHIVOS
+   ============================================ */
+
+.modern-input-files-preview {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 0.5rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.modern-input-file-item {
+  position: relative;
+  flex-shrink: 0;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  background-color: var(--bg-secondary);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.modern-input-file-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.modern-input-file-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  background-color: var(--bg-tertiary);
+}
+
+.modern-input-file-name {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.25rem;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 0.625rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modern-input-file-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 1.125rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+  z-index: 2;
+}
+
+.modern-input-file-remove:hover {
+  background-color: var(--error);
+}
+
+/* ============================================
+   FORMULARIO DE INPUT
+   ============================================ */
+
+.modern-input-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+}
+
+/* ============================================
+   ACCIONES IZQUIERDA
+   ============================================ */
+
+.modern-input-actions-left {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.modern-input-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.modern-input-btn:hover {
+  background-color: var(--bubble-hover);
+  color: var(--accent-primary);
+}
+
+.modern-input-btn:active {
+  transform: scale(0.95);
+}
+
+.modern-input-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   TEXTAREA
+   ============================================ */
+
+.modern-input-textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 0.625rem 0.875rem;
+  border: none;
+  border-radius: 20px;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+  transition: background-color 0.2s;
+}
+
+.modern-input-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.modern-input-textarea:focus {
+  background-color: var(--bg-primary);
+}
+
+.modern-input-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   BOTÓN ENVIAR
+   ============================================ */
+
+.modern-input-send {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--accent-primary);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.modern-input-send:hover {
+  background-color: var(--accent-hover);
+  transform: scale(1.05);
+  box-shadow: var(--shadow-md);
+}
+
+.modern-input-send:active {
+  transform: scale(0.95);
+}
+
+.modern-input-send:disabled {
+  background-color: var(--text-tertiary);
+  cursor: not-allowed;
+  transform: scale(1);
+  opacity: 0.5;
+}
+
+/* ============================================
+   PICKER DE EMOJIS
+   ============================================ */
+
+.modern-emoji-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 1.25rem;
+  margin-bottom: 0.5rem;
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.375rem;
+  z-index: 100;
+  animation: scaleIn 0.15s ease;
+  border: 1px solid var(--border-color);
+}
+
+.modern-emoji-item {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modern-emoji-item:hover {
+  background-color: var(--bg-tertiary);
+  transform: scale(1.2);
+}
+
+.modern-emoji-item:active {
+  transform: scale(0.9);
+}
+
+/* ============================================
+   MODAL DE UBICACIÓN
+   ============================================ */
+
+.modern-location-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.2s ease;
+}
+
+.modern-location-modal {
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: scaleIn 0.2s ease;
+}
+
+.modern-location-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modern-location-modal-header h3 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.modern-location-modal-header button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.modern-location-modal-header button:hover {
+  background-color: var(--bubble-hover);
+  color: var(--text-primary);
+}
+
+.modern-location-modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modern-location-field {
+  margin-bottom: 1rem;
+}
+
+.modern-location-field label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.modern-location-field input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.modern-location-field input:focus {
+  border-color: var(--accent-primary);
+}
+
+.modern-location-current-btn {
+  width: 100%;
+  padding: 0.875rem;
+  border: 1px dashed var(--accent-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 0.5rem;
+}
+
+.modern-location-current-btn:hover {
+  background-color: var(--accent-light);
+}
+
+.modern-location-current-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modern-location-modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.modern-location-cancel,
+.modern-location-send {
+  flex: 1;
+  padding: 0.875rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modern-location-cancel {
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.modern-location-cancel:hover {
+  background-color: var(--bubble-hover);
+  color: var(--text-primary);
+}
+
+.modern-location-send {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.modern-location-send:hover {
+  background-color: var(--accent-hover);
+}
+
+.modern-location-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modern-location-cancel:active,
+.modern-location-send:active {
+  transform: scale(0.98);
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+  .modern-input-form {
+    padding: 0.625rem 1rem;
+  }
+
+  .modern-input-files-preview {
+    padding: 0.875rem 1rem 0.5rem;
+  }
+
+  .modern-input-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .modern-input-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .modern-input-send {
+    width: 40px;
+    height: 40px;
+  }
+
+  .modern-emoji-picker {
+    left: 1rem;
+    grid-template-columns: repeat(6, 1fr);
+    padding: 0.625rem;
+  }
+
+  .modern-emoji-item {
+    width: 36px;
+    height: 36px;
+    font-size: 1.25rem;
+  }
+
+  .modern-location-modal {
+    max-width: 100%;
+    margin: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .modern-input-form {
+    padding: 0.5rem 0.875rem;
+    gap: 0.375rem;
+  }
+
+  .modern-input-files-preview {
+    padding: 0.75rem 0.875rem 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .modern-input-file-item {
+    width: 70px;
+    height: 70px;
+  }
+
+  .modern-input-actions-left {
+    gap: 0.125rem;
+  }
+
+  .modern-input-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .modern-input-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .modern-input-textarea {
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .modern-input-send {
+    width: 36px;
+    height: 36px;
+  }
+
+  .modern-input-send svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .modern-emoji-picker {
+    left: 0.875rem;
+    grid-template-columns: repeat(5, 1fr);
+    padding: 0.5rem;
+  }
+
+  .modern-emoji-item {
+    width: 32px;
+    height: 32px;
+    font-size: 1.125rem;
+  }
+
+  .modern-location-modal-header,
+  .modern-location-modal-body,
+  .modern-location-modal-footer {
+    padding: 1rem;
+  }
+
+  .modern-location-modal-header h3 {
+    font-size: 1.125rem;
+  }
+
+  .modern-location-field input {
+    padding: 0.625rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* Prevenir zoom en inputs en iOS */
+@media (max-width: 480px) {
+  .modern-input-textarea,
+  .modern-location-field input {
+    font-size: 16px;
+  }
+}

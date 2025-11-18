@@ -1,0 +1,151 @@
+/* Ejemplo de CSS para usar los colores personalizados */
+
+/* Los colores están disponibles como variables CSS: */
+:root {
+  --custom-primary: #007bff;      /* Color primario del usuario */
+  --custom-secondary: #6c757d;    /* Color secundario del usuario */
+}
+
+/* EJEMPLOS DE USO: */
+
+/* 1. Botones */
+.btn-custom-primary {
+  background-color: var(--custom-primary);
+  border-color: var(--custom-primary);
+  color: white;
+}
+
+.btn-custom-secondary {
+  background-color: var(--custom-secondary);
+  border-color: var(--custom-secondary);
+  color: white;
+}
+
+/* 2. Headers/Encabezados */
+.custom-header {
+  background: linear-gradient(135deg, var(--custom-primary), var(--custom-secondary));
+  color: white;
+  padding: 1rem;
+}
+
+/* 3. Enlaces */
+.custom-link {
+  color: var(--custom-primary);
+}
+
+.custom-link:hover {
+  color: var(--custom-secondary);
+}
+
+/* 4. Badges/Insignias */
+.badge-custom {
+  background-color: var(--custom-primary);
+  color: white;
+}
+
+/* 5. Bordes */
+.custom-border {
+  border: 2px solid var(--custom-primary);
+}
+
+/* 6. Cards */
+.custom-card {
+  border-top: 4px solid var(--custom-primary);
+}
+
+.custom-card-header {
+  background-color: var(--custom-primary);
+  color: white;
+}
+
+/* 7. Progress bars */
+.custom-progress-bar {
+  background-color: var(--custom-primary);
+}
+
+/* 8. Alerts */
+.alert-custom {
+  background-color: rgba(var(--custom-primary-rgb), 0.1);
+  border-color: var(--custom-primary);
+  color: var(--custom-primary);
+}
+
+/* 9. Navegación */
+.nav-custom .nav-link.active {
+  background-color: var(--custom-primary);
+  color: white;
+}
+
+/* 10. Tooltips */
+.tooltip-custom {
+  background-color: var(--custom-primary);
+}
+
+
+/* EJEMPLO EN REACT/JSX: */
+
+/*
+// Opción 1: Usando las variables CSS directamente
+<div style={{ backgroundColor: 'var(--custom-primary)', color: 'white' }}>
+  Contenido con color personalizado
+</div>
+
+// Opción 2: Usando el hook useTheme
+import { useTheme } from '../context/ThemeContext';
+
+function MiComponente() {
+  const { customColors } = useTheme();
+  
+  return (
+    <div style={{ 
+      backgroundColor: customColors.primary,
+      color: 'white',
+      padding: '20px',
+      borderRadius: '8px'
+    }}>
+      Contenido con colores del usuario
+    </div>
+  );
+}
+
+// Opción 3: Usando clases CSS
+<button className="btn-custom-primary">
+  Mi Botón Personalizado
+</button>
+
+<div className="custom-card">
+  <div className="custom-card-header">
+    Encabezado
+  </div>
+  <div className="card-body">
+    Contenido
+  </div>
+</div>
+
+// Opción 4: Gradientes personalizados
+<div style={{
+  background: `linear-gradient(135deg, ${customColors.primary}, ${customColors.secondary})`,
+  color: 'white',
+  padding: '40px',
+  textAlign: 'center'
+}}>
+  Banner con gradiente personalizado
+</div>
+*/
+
+
+/* VARIABLES DISPONIBLES GLOBALMENTE: */
+/*
+--custom-primary         Color primario elegido por el usuario
+--custom-secondary       Color secundario elegido por el usuario
+--accent-primary         Alias de custom-primary
+--accent-secondary       Alias de custom-secondary
+--primary-color          Alias de custom-primary
+--secondary-color        Alias de custom-secondary
+*/
+
+
+/* IMPORTANTE: */
+/* Cuando el usuario cambie los colores en Configuración, 
+   todas estas variables se actualizarán automáticamente 
+   y los estilos se aplicarán en tiempo real sin recargar la página. */

@@ -43,7 +43,40 @@ app.use(
 );
 app.use(express.json());
 
-const SECRET_KEY = config.get('ATTENDANCE_SECRET_KEY') || env.JWT_SECRET;
+let cachedJwtSecret;
+const resolveJwtSecret = () => {
+  if (cachedJwtSecret) {
+    return cachedJwtSecret;
+  }
+
+  const candidates = [
+    config.get('ATTENDANCE_SECRET_KEY'),
+    env.JWT_SECRET,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : value))
+    .filter(Boolean);
+
+  const unique = [...new Set(candidates)];
+
+  if (!unique.length) {
+    throw new Error('JWT_SECRET no configurado. Define una clave compartida para todos los servicios.');
+  }
+
+  if (unique.length > 1) {
+    throw new Error('ATTENDANCE_SECRET_KEY y JWT_SECRET no coinciden. Usa un solo secreto compartido.');
+  }
+
+  cachedJwtSecret = unique[0];
+  return cachedJwtSecret;
+};
+
+let SECRET_KEY;
+try {
+  SECRET_KEY = resolveJwtSecret();
+} catch (error) {
+  console.error('JWT configuration error:', error.message);
+  process.exit(1);
+}
 
 const pool = mysql.createPool({
   host: env.DB_HOST,
@@ -74,6 +107,18 @@ const stripDiacritics = (value) =>
         .replace(/[\u0300-\u036f]/g, '')
         .trim()
     : value;
+
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+  return String(value).slice(0, 10);
+};
 
 const normalizeLevelKey = (value) =>
   typeof value === 'string' ? stripDiacritics(value).toLowerCase() : value;
@@ -271,6 +316,44 @@ const asyncHandler = (handler) => (req, res, next) => {
   Promise.resolve(handler(req, res, next)).catch(next);
 };
 
+const toNumericOrNull = (value) => {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const resolveAttendanceScopeKey = (asignacionId, cursoId, materiaId) => {
+  const asignacion = toNumericOrNull(asignacionId);
+  const curso = toNumericOrNull(cursoId);
+  const materia = toNumericOrNull(materiaId);
+
+  if (asignacion != null) {
+    return `a:${asignacion}`;
+  }
+  if (curso != null) {
+    return `c:${curso}`;
+  }
+  if (materia != null) {
+    return `m:${materia}`;
+  }
+  return 'm:null';
+};
+
+const normalizeRole = (value) => {
+  if (!value) return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'docente' || normalized === 'teacher') {
+    return 'profesor';
+  }
+  if (normalized === 'alumno' || normalized === 'student') {
+    return 'estudiante';
+  }
+  return normalized;
+};
+
 const authMiddleware = (allowedRoles = []) => (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -282,14 +365,21 @@ const authMiddleware = (allowedRoles = []) => (req, res, next) => {
     return res.status(401).json({ error: 'Formato de token invalido' });
   }
 
+  const normalizedAllowedRoles = allowedRoles.map(normalizeRole);
+
   try {
     const decoded = jwt.verify(parts[1], SECRET_KEY);
-    req.user = decoded;
+    const normalizedRol = normalizeRole(decoded.rol);
+    req.user = {
+      ...decoded,
+      rol: normalizedRol,
+      rawRol: decoded.rol,
+    };
   } catch (error) {
     return res.status(401).json({ error: 'Token invalido' });
   }
 
-  if (allowedRoles.length && !allowedRoles.includes(req.user.rol)) {
+  if (normalizedAllowedRoles.length && !normalizedAllowedRoles.includes(req.user.rol)) {
     return res.status(403).json({ error: 'Permisos insuficientes' });
   }
 
@@ -351,9 +441,14 @@ io.use((socket, next) => {
 
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
-    socket.user = decoded;
-    socket.join(`rol:${decoded.rol}`);
-    if (decoded.rol === 'profesor') {
+    const normalizedRol = normalizeRole(decoded.rol);
+    socket.user = {
+      ...decoded,
+      rol: normalizedRol,
+      rawRol: decoded.rol,
+    };
+    socket.join(`rol:${normalizedRol}`);
+    if (normalizedRol === 'profesor') {
       socket.join(`profesor:${decoded.id}`);
     }
     next();
@@ -381,7 +476,22 @@ app.get(
   authMiddleware(['administrativo']),
   asyncHandler(async (req, res) => {
     const [rows] = await pool.query(
-      'SELECT id, estudiante_id, materia_id, estado, fecha, profesor_id, asignacion_id FROM asistencias ORDER BY fecha DESC, id DESC'
+      `SELECT id,
+              estudiante_id,
+              estudiante_nombre,
+              materia_id,
+              estado,
+              fecha,
+              profesor_id,
+              asignacion_id,
+              curso_id,
+              curso_nombre,
+              observaciones,
+              modificado_por,
+              fecha_modificacion,
+              bloqueado
+         FROM asistencias
+        ORDER BY fecha DESC, id DESC`
     );
     res.json(rows);
   })
@@ -394,7 +504,22 @@ app.get(
     const { fecha, asignacionId, materiaId } = req.query;
     const params = [req.user.id];
     let query =
-      'SELECT id, estudiante_id, materia_id, estado, fecha, profesor_id, asignacion_id FROM asistencias WHERE profesor_id = ?';
+      `SELECT id,
+              estudiante_id,
+              estudiante_nombre,
+              materia_id,
+              estado,
+              fecha,
+              profesor_id,
+              asignacion_id,
+              curso_id,
+              curso_nombre,
+              observaciones,
+              modificado_por,
+              fecha_modificacion,
+              bloqueado
+         FROM asistencias
+        WHERE profesor_id = ?`;
 
     if (asignacionId) {
       query += ' AND asignacion_id = ?';
@@ -424,7 +549,22 @@ app.get(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const [[attendance]] = await pool.execute(
-      'SELECT id, estudiante_id, materia_id, estado, fecha, profesor_id, asignacion_id FROM asistencias WHERE id = ?',
+      `SELECT id,
+              estudiante_id,
+              estudiante_nombre,
+              materia_id,
+              estado,
+              fecha,
+              profesor_id,
+              asignacion_id,
+              curso_id,
+              curso_nombre,
+              observaciones,
+              modificado_por,
+              fecha_modificacion,
+              bloqueado
+         FROM asistencias
+        WHERE id = ?`,
       [id]
     );
 
@@ -449,23 +589,50 @@ app.post(
   asyncHandler(async (req, res) => {
     const {
       estudiante_id,
+      estudiante_nombre,
       materia_id,
       estado,
       fecha,
       asignacion_id,
       profesorId,
+      curso_id,
+      curso_nombre,
+      observaciones,
+      modificado_por,
     } = req.body;
 
     if (!estudiante_id || !materia_id || !estado) {
       return res.status(400).json({ error: 'Faltan datos obligatorios' });
     }
 
-    const normalizedEstado = String(estado).trim().toUpperCase();
-    const attendanceDate = fecha || new Date().toISOString().slice(0, 10);
+  const normalizedEstado = String(estado).trim().toLowerCase();
+  const attendanceDate = normalizeDateOnly(fecha) || new Date().toISOString().slice(0, 10);
     const targetProfesorId = req.user.rol === 'profesor' ? req.user.id : profesorId;
 
     if (!targetProfesorId) {
       return res.status(400).json({ error: 'profesorId requerido' });
+    }
+
+    // Validar si la fecha corresponde al horario del curso (solo si hay curso_id)
+    if (curso_id) {
+      const [validacionResult] = await classesPool.execute(
+        `SELECT fn_es_dia_valido_curso(?, ?) AS es_valido`,
+        [curso_id, attendanceDate]
+      );
+      
+      const esValido = validacionResult[0].es_valido === 1;
+      
+      // Solo validar si el curso tiene horarios configurados
+      const [horariosExist] = await classesPool.execute(
+        `SELECT COUNT(*) as count FROM horarios_curso WHERE curso_id = ? AND activo = TRUE`,
+        [curso_id]
+      );
+      
+      if (horariosExist[0].count > 0 && !esValido) {
+        return res.status(400).json({ 
+          error: 'Esta fecha no corresponde a un día de clase de este curso' 
+        });
+      }
     }
 
     if (req.user.rol === 'profesor') {
@@ -485,27 +652,143 @@ app.post(
       }
     }
 
+    let duplicateClause = '';
+    const duplicateParams = [];
+    if (asignacion_id != null) {
+      duplicateClause = 'asignacion_id = ?';
+      duplicateParams.push(asignacion_id);
+    } else if (curso_id != null) {
+      duplicateClause = 'asignacion_id IS NULL AND curso_id = ?';
+      duplicateParams.push(curso_id);
+    } else {
+      duplicateClause = 'curso_id IS NULL AND asignacion_id IS NULL AND materia_id = ?';
+      duplicateParams.push(materia_id);
+    }
+
+    const [existingRows] = await pool.execute(
+      `SELECT *
+         FROM asistencias
+        WHERE estudiante_id = ?
+          AND DATE(fecha) = ?
+          AND ${duplicateClause}
+        LIMIT 1`,
+      [estudiante_id, attendanceDate, ...duplicateParams]
+    );
+
+    if (existingRows.length > 0) {
+      const existing = existingRows[0];
+      const previousProfesorId = existing.profesor_id;
+      const previousAsignacionId = existing.asignacion_id;
+
+      const nextAsignacionId = asignacion_id ?? existing.asignacion_id;
+      const nextCursoId = curso_id ?? existing.curso_id;
+      const nextCursoNombre = curso_nombre ?? existing.curso_nombre;
+      const nextEstudianteNombre = estudiante_nombre ?? existing.estudiante_nombre;
+      const nextObservaciones = observaciones ?? existing.observaciones;
+      const nextMateriaId = materia_id ?? existing.materia_id;
+      const nextModificadoPor = modificado_por || targetProfesorId;
+
+      await pool.execute(
+        `UPDATE asistencias
+            SET estudiante_id = ?,
+                estudiante_nombre = ?,
+                materia_id = ?,
+                estado = ?,
+                fecha = ?,
+                profesor_id = ?,
+                asignacion_id = ?,
+                curso_id = ?,
+                curso_nombre = ?,
+                observaciones = ?,
+                modificado_por = ?,
+                fecha_modificacion = NOW()
+          WHERE id = ?`,
+        [
+          existing.estudiante_id,
+          nextEstudianteNombre,
+          nextMateriaId,
+          normalizedEstado,
+          attendanceDate,
+          targetProfesorId,
+          nextAsignacionId,
+          nextCursoId,
+          nextCursoNombre,
+          nextObservaciones,
+          nextModificadoPor,
+          existing.id,
+        ]
+      );
+
+      const [[updatedRecord]] = await pool.execute(
+        'SELECT id, estudiante_id, estudiante_nombre, materia_id, estado, fecha, profesor_id, asignacion_id, curso_id, curso_nombre, observaciones, modificado_por FROM asistencias WHERE id = ?',
+        [existing.id]
+      );
+
+      const socket = req.app.get('io');
+      if (updatedRecord) {
+        if (updatedRecord.fecha) {
+          updatedRecord.fecha = normalizeDateOnly(updatedRecord.fecha);
+        }
+        if (previousProfesorId && Number(previousProfesorId) !== Number(updatedRecord.profesor_id)) {
+          socket.to(`profesor:${previousProfesorId}`).emit('attendance:updated', updatedRecord);
+        }
+        socket.to(`profesor:${updatedRecord.profesor_id}`).emit('attendance:updated', updatedRecord);
+
+        if (previousAsignacionId && Number(previousAsignacionId) !== Number(updatedRecord.asignacion_id)) {
+          socket.to(`asignacion:${previousAsignacionId}`).emit('attendance:updated', updatedRecord);
+        }
+        if (updatedRecord.asignacion_id) {
+          socket.to(`asignacion:${updatedRecord.asignacion_id}`).emit('attendance:updated', updatedRecord);
+        }
+        socket.emit('attendance:changed', { action: 'updated', record: updatedRecord });
+      }
+
+      return res.status(200).json({ message: 'Asistencia actualizada', record: updatedRecord });
+    }
+
     const [result] = await pool.execute(
-      `INSERT INTO asistencias (estudiante_id, materia_id, estado, fecha, profesor_id, asignacion_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO asistencias (
+        estudiante_id, 
+        estudiante_nombre, 
+        materia_id, 
+        estado, 
+        fecha, 
+        profesor_id, 
+        asignacion_id,
+        curso_id,
+        curso_nombre,
+        observaciones,
+        modificado_por
+      )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         estudiante_id,
+        estudiante_nombre || null,
         materia_id,
         normalizedEstado,
         attendanceDate,
         targetProfesorId,
         asignacion_id || null,
+        curso_id || null,
+        curso_nombre || null,
+        observaciones || null,
+        modificado_por || targetProfesorId,
       ]
     );
 
     const record = {
       id: result.insertId,
       estudiante_id,
+      estudiante_nombre,
       materia_id,
       estado: normalizedEstado,
       fecha: attendanceDate,
       profesor_id: targetProfesorId,
       asignacion_id: asignacion_id || null,
+      curso_id: curso_id || null,
+      curso_nombre: curso_nombre || null,
+      observaciones: observaciones || null,
+      modificado_por: modificado_por || targetProfesorId,
     };
 
     const socket = req.app.get('io');
@@ -526,10 +809,15 @@ app.put(
     const { id } = req.params;
     const {
       estudiante_id,
+      estudiante_nombre,
       materia_id,
       estado,
       fecha,
       asignacion_id,
+      curso_id,
+      curso_nombre,
+      observaciones,
+      modificado_por,
     } = req.body;
 
     const [[existing]] = await pool.execute(
@@ -561,26 +849,111 @@ app.put(
       }
     }
 
-    const nextEstado = estado ? String(estado).trim().toUpperCase() : existing.estado;
+    const nextEstado = estado ? String(estado).trim().toLowerCase() : existing.estado;
     const nextFecha = fecha || existing.fecha;
     const nextAsignacionId = asignacion_id ?? existing.asignacion_id;
     const nextEstudianteId = estudiante_id ?? existing.estudiante_id;
+    const nextEstudianteNombre = estudiante_nombre ?? existing.estudiante_nombre;
     const nextMateriaId = materia_id ?? existing.materia_id;
+    const nextCursoId = curso_id ?? existing.curso_id;
+    const nextCursoNombre = curso_nombre ?? existing.curso_nombre;
+    const nextObservaciones = observaciones ?? existing.observaciones;
+    const nextModificadoPor = modificado_por || req.user.id;
+    const previousAsignacionId = existing.asignacion_id;
+
+    const normalizedFecha = normalizeDateOnly(nextFecha);
+    const normalizedExistingFecha = normalizeDateOnly(existing.fecha);
+
+    const currentScopeKey = resolveAttendanceScopeKey(
+      existing.asignacion_id,
+      existing.curso_id,
+      existing.materia_id
+    );
+    const nextScopeKey = resolveAttendanceScopeKey(nextAsignacionId, nextCursoId, nextMateriaId);
+
+    const uniquenessChanged =
+      Number(existing.estudiante_id) !== Number(nextEstudianteId) ||
+      normalizedExistingFecha !== normalizedFecha ||
+      currentScopeKey !== nextScopeKey;
+
+    if (!normalizedFecha) {
+      return res.status(400).json({ error: 'Fecha inválida' });
+    }
+
+    if (nextCursoId) {
+      const [validacionResult] = await classesPool.execute(
+        `SELECT fn_es_dia_valido_curso(?, ?) AS es_valido`,
+        [nextCursoId, normalizedFecha]
+      );
+
+      const esValido = validacionResult[0].es_valido === 1;
+
+      const [horariosExist] = await classesPool.execute(
+        `SELECT COUNT(*) as count FROM horarios_curso WHERE curso_id = ? AND activo = TRUE`,
+        [nextCursoId]
+      );
+
+      if (horariosExist[0].count > 0 && !esValido) {
+        return res.status(400).json({ error: 'Esta fecha no corresponde a un día de clase de este curso' });
+      }
+    }
+
+    if (uniquenessChanged) {
+      let updateDuplicateClause = '';
+      const updateDuplicateParams = [];
+      if (nextAsignacionId != null) {
+        updateDuplicateClause = 'asignacion_id = ?';
+        updateDuplicateParams.push(nextAsignacionId);
+      } else if (nextCursoId != null) {
+        updateDuplicateClause = 'asignacion_id IS NULL AND curso_id = ?';
+        updateDuplicateParams.push(nextCursoId);
+      } else {
+        updateDuplicateClause = 'curso_id IS NULL AND asignacion_id IS NULL AND materia_id = ?';
+        updateDuplicateParams.push(nextMateriaId);
+      }
+
+      const [conflicts] = await pool.execute(
+        `SELECT id FROM asistencias
+          WHERE id <> ?
+            AND estudiante_id = ?
+            AND DATE(fecha) = ?
+            AND ${updateDuplicateClause}
+          LIMIT 1`,
+        [id, nextEstudianteId, normalizedFecha, ...updateDuplicateParams]
+      );
+
+      if (conflicts.length > 0) {
+        return res
+          .status(409)
+          .json({ error: 'Ya existe una asistencia registrada para este estudiante en esa fecha' });
+      }
+    }
 
     await pool.execute(
       `UPDATE asistencias
           SET estudiante_id = ?,
+              estudiante_nombre = ?,
               materia_id = ?,
               estado = ?,
               fecha = ?,
-              asignacion_id = ?
+              asignacion_id = ?,
+              curso_id = ?,
+              curso_nombre = ?,
+              observaciones = ?,
+              modificado_por = ?,
+              fecha_modificacion = NOW()
         WHERE id = ?`,
       [
         nextEstudianteId,
+        nextEstudianteNombre,
         nextMateriaId,
         nextEstado,
-        nextFecha,
+        normalizedFecha,
         nextAsignacionId,
+        nextCursoId,
+        nextCursoNombre,
+        nextObservaciones,
+        nextModificadoPor,
         id,
       ]
     );
@@ -588,15 +961,23 @@ app.put(
     const record = {
       id: Number(id),
       estudiante_id: nextEstudianteId,
+      estudiante_nombre: nextEstudianteNombre,
       materia_id: nextMateriaId,
       estado: nextEstado,
-      fecha: nextFecha,
+  fecha: normalizedFecha,
       profesor_id: existing.profesor_id,
       asignacion_id: nextAsignacionId,
+      curso_id: nextCursoId,
+      curso_nombre: nextCursoNombre,
+      observaciones: nextObservaciones,
+      modificado_por: nextModificadoPor,
     };
 
     const socket = req.app.get('io');
     socket.to(`profesor:${existing.profesor_id}`).emit('attendance:updated', record);
+    if (previousAsignacionId && Number(previousAsignacionId) !== Number(nextAsignacionId)) {
+      socket.to(`asignacion:${previousAsignacionId}`).emit('attendance:updated', record);
+    }
     if (nextAsignacionId) {
       socket.to(`asignacion:${nextAsignacionId}`).emit('attendance:updated', record);
     }
@@ -638,6 +1019,136 @@ app.delete(
     socket.emit('attendance:changed', { action: 'deleted', id: Number(id) });
 
     res.json({ message: 'Asistencia eliminada' });
+  })
+);
+
+// ========================================
+// NUEVOS ENDPOINTS PARA HORARIOS Y ESTADÍSTICAS
+// ========================================
+
+// Obtener estadísticas de asistencia por estudiante y curso
+app.get(
+  '/asistencias/estadisticas/estudiante/:id',
+  authMiddleware(['administrativo', 'profesor', 'estudiante']),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    
+    // Validar acceso: estudiantes solo pueden ver sus propias estadísticas
+    if (req.user.rol === 'estudiante' && parseInt(id) !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes permiso para ver estas estadísticas' });
+    }
+
+    const [stats] = await pool.execute(
+      `SELECT * FROM v_estadisticas_estudiante_curso WHERE estudiante_id = ?`,
+      [id]
+    );
+
+    res.json(stats);
+  })
+);
+
+// Obtener estadísticas de asistencia por curso y fecha
+app.get(
+  '/asistencias/estadisticas/curso/:cursoId',
+  authMiddleware(['administrativo', 'profesor']),
+  asyncHandler(async (req, res) => {
+    const { cursoId } = req.params;
+    const { fechaInicio, fechaFin } = req.query;
+
+    let query = 'SELECT * FROM v_estadisticas_curso_fecha WHERE curso_id = ?';
+    const params = [cursoId];
+
+    if (fechaInicio) {
+      query += ' AND fecha >= ?';
+      params.push(fechaInicio);
+    }
+
+    if (fechaFin) {
+      query += ' AND fecha <= ?';
+      params.push(fechaFin);
+    }
+
+    query += ' ORDER BY fecha DESC';
+
+    const [stats] = await pool.execute(query, params);
+
+    res.json(stats);
+  })
+);
+
+// Obtener horarios de un curso
+app.get(
+  '/cursos/:cursoId/horarios',
+  authMiddleware(['administrativo', 'profesor', 'estudiante']),
+  asyncHandler(async (req, res) => {
+    const { cursoId } = req.params;
+
+    const [horarios] = await classesPool.execute(
+      `CALL sp_obtener_horarios_curso(?)`,
+      [cursoId]
+    );
+
+    // El stored procedure retorna el resultado en horarios[0]
+    res.json(horarios[0] || []);
+  })
+);
+
+// Agregar o actualizar horario de un curso
+app.post(
+  '/cursos/:cursoId/horarios',
+  authMiddleware(['administrativo']),
+  asyncHandler(async (req, res) => {
+    const { cursoId } = req.params;
+    const { curso_nombre, dia_semana, hora_inicio, hora_fin } = req.body;
+
+    if (!curso_nombre || !dia_semana) {
+      return res.status(400).json({ error: 'curso_nombre y dia_semana son obligatorios' });
+    }
+
+    if (dia_semana < 1 || dia_semana > 7) {
+      return res.status(400).json({ error: 'dia_semana debe estar entre 1 (Lunes) y 7 (Domingo)' });
+    }
+
+    await classesPool.execute(
+      `CALL sp_agregar_horario_curso(?, ?, ?, ?, ?)`,
+      [cursoId, curso_nombre, dia_semana, hora_inicio || null, hora_fin || null]
+    );
+
+    res.json({ message: 'Horario agregado/actualizado correctamente' });
+  })
+);
+
+// Validar si una fecha es válida para un curso (según sus horarios)
+app.get(
+  '/cursos/:cursoId/validar-fecha/:fecha',
+  authMiddleware(['administrativo', 'profesor']),
+  asyncHandler(async (req, res) => {
+    const { cursoId, fecha } = req.params;
+
+    const [result] = await classesPool.execute(
+      `SELECT fn_es_dia_valido_curso(?, ?) AS es_valido`,
+      [cursoId, fecha]
+    );
+
+    const esValido = result[0].es_valido === 1;
+
+    res.json({ es_valido: esValido });
+  })
+);
+
+// Eliminar horario de un curso
+app.delete(
+  '/cursos/:cursoId/horarios/:diaSemana',
+  authMiddleware(['administrativo']),
+  asyncHandler(async (req, res) => {
+    const { cursoId, diaSemana } = req.params;
+
+    await classesPool.execute(
+      `DELETE FROM horarios_curso WHERE curso_id = ? AND dia_semana = ?`,
+      [cursoId, diaSemana]
+    );
+
+    res.json({ message: 'Horario eliminado correctamente' });
   })
 );
 

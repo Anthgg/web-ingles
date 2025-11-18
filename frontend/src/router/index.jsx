@@ -10,6 +10,7 @@ const TeacherPage = lazy(() => import('../pages/Teacher'));
 const StudentPage = lazy(() => import('../pages/Student'));
 const ForbiddenPage = lazy(() => import('../pages/Forbidden'));
 const NotFoundPage = lazy(() => import('../pages/NotFound'));
+const ChatPage = lazy(() => import('../chat').then(module => ({ default: module.Chat })));
 
 const PageSpinner = () => (
   <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '60vh' }}>
@@ -101,6 +102,17 @@ const AppRouter = () => (
             <RequireAuth>
               <SuspenseWithBoundary>
                 <RoleRedirect />
+              </SuspenseWithBoundary>
+            </RequireAuth>
+          )}
+        />
+
+        <Route
+          path="/chat"
+          element={(
+            <RequireAuth>
+              <SuspenseWithBoundary>
+                <ChatPage />
               </SuspenseWithBoundary>
             </RequireAuth>
           )}

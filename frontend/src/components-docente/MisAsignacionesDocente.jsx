@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   FaBook,
   FaCalendarAlt,
@@ -20,6 +20,64 @@ import {
 } from 'react-icons/fa';
 import { Button } from 'react-bootstrap';
 import axios from 'axios';
+
+const getAsignacionUniqueKey = (asignacion) => {
+  if (!asignacion) {
+    return null;
+  }
+
+  const rawAsignacionId = asignacion.asignacion_id ?? asignacion.id;
+  const asignacionId = rawAsignacionId != null ? Number(rawAsignacionId) : null;
+  const cursoId = asignacion.curso_id != null ? Number(asignacion.curso_id) : null;
+  const nombreCurso = typeof asignacion.curso_nombre === 'string'
+    ? asignacion.curso_nombre.trim().toLowerCase()
+    : typeof asignacion.materia_nombre === 'string'
+      ? asignacion.materia_nombre.trim().toLowerCase()
+      : '';
+  const dia = asignacion.dia_semana != null ? String(asignacion.dia_semana).trim().toLowerCase() : '';
+  const horaInicio = asignacion.hora_inicio ? asignacion.hora_inicio.toString().slice(0, 5) : '';
+  const horaFin = asignacion.hora_fin ? asignacion.hora_fin.toString().slice(0, 5) : '';
+  const aula = asignacion.aula ? asignacion.aula.toString().trim().toLowerCase() : '';
+  const seccion = asignacion.seccion || asignacion.grupo || asignacion.seccion_nombre;
+  const seccionKey = seccion != null ? String(seccion).trim().toLowerCase() : '';
+
+  const baseParts = [];
+  if (!Number.isNaN(asignacionId) && asignacionId !== null) {
+    baseParts.push(`a-${asignacionId}`);
+  }
+  if (!Number.isNaN(cursoId) && cursoId !== null) {
+    baseParts.push(`c-${cursoId}`);
+  }
+  if (!baseParts.length && nombreCurso) {
+    baseParts.push(`n-${nombreCurso}`);
+  }
+
+  const baseKey = baseParts.join('|');
+  const parts = [baseKey, dia, horaInicio, horaFin, aula, seccionKey].filter(Boolean);
+  return parts.length ? parts.join('|') : null;
+};
+
+const dedupeAsignaciones = (asignaciones = []) => {
+  if (!Array.isArray(asignaciones) || asignaciones.length === 0) {
+    return [];
+  }
+
+  const vistos = new Set();
+
+  return asignaciones.filter((asignacion) => {
+    const key = getAsignacionUniqueKey(asignacion);
+    if (!key) {
+      return true;
+    }
+
+    if (vistos.has(key)) {
+      return false;
+    }
+
+    vistos.add(key);
+    return true;
+  });
+};
 
 const MisAsignacionesDocente = ({   
   asignaciones: initialAsignaciones,
@@ -104,8 +162,9 @@ const MisAsignacionesDocente = ({
         asignacionesData = response.data;
       }
       
-      setLocalAsignaciones(asignacionesData);
-      organizarCursosPorDia(asignacionesData);
+  const deduplicated = dedupeAsignaciones(asignacionesData);
+  setLocalAsignaciones(deduplicated);
+  organizarCursosPorDia(deduplicated);
       
       if (asignacionesData.length > 0) {
         showSuccess && showSuccess('Datos de horario actualizados');
@@ -129,8 +188,9 @@ const MisAsignacionesDocente = ({
   // Efecto inicial para cargar datos
   useEffect(() => {
     if (!initialDataProcessed.current && initialAsignaciones && initialAsignaciones.length > 0) {
-      setLocalAsignaciones(initialAsignaciones);
-      organizarCursosPorDia(initialAsignaciones);
+  const dedupedInitial = dedupeAsignaciones(initialAsignaciones);
+  setLocalAsignaciones(dedupedInitial);
+  organizarCursosPorDia(dedupedInitial);
       initialDataProcessed.current = true;
     } else if (!initialDataProcessed.current && token && userInfo && !fetchInProgress.current) {
       fetchAsignaciones();
@@ -203,6 +263,29 @@ const MisAsignacionesDocente = ({
   const asignacionesFiltered = asignacionesFiltradas();
   const diaActual = getDiaActual();
 
+  const resumenRapido = useMemo(() => {
+    const totalClases = stats.totalCursos || 0;
+    const totalHoras = stats.horasTotales || 0;
+
+    let totalEstudiantes = 0;
+    if (Array.isArray(localAsignaciones) && localAsignaciones.length > 0) {
+      totalEstudiantes = localAsignaciones.reduce((acc, asignacion) => {
+        const rawValor = asignacion.total_estudiantes ?? asignacion.estudiantes_asignados ?? asignacion.estudiantes_count ?? asignacion.cantidad_estudiantes ?? asignacion.max_alumnos;
+        const numeric = Number(rawValor);
+        if (!Number.isNaN(numeric) && numeric > 0) {
+          return acc + numeric;
+        }
+        return acc;
+      }, 0);
+    }
+
+    return {
+      totalClases,
+      totalHoras,
+      totalEstudiantes: totalEstudiantes > 0 ? totalEstudiantes : null,
+    };
+  }, [stats, localAsignaciones]);
+
   // Manejador para actualización manual
   const handleManualUpdate = () => {
     initialDataProcessed.current = false;
@@ -229,13 +312,13 @@ const MisAsignacionesDocente = ({
   
   // Colores del tema
   const themeColors = {
-    primary: modoOscuro ? '#6366f1' : '#4361EE',
-    secondary: modoOscuro ? '#334155' : '#f9fafb',
-    accent: modoOscuro ? '#f472b6' : '#F72585',
-    text: modoOscuro ? '#e2e8f0' : '#1e293b',
-    border: modoOscuro ? '#334155' : '#e5e7eb',
-    cardBg: modoOscuro ? '#1e293b' : '#ffffff',
-    cardBorder: modoOscuro ? '#334155' : '#f3f4f6'
+    primary: '#6366F1',
+    secondary: modoOscuro ? '#1E1B4B' : '#EEF2FF',
+    accent: modoOscuro ? '#A78BFA' : '#7C3AED',
+    text: modoOscuro ? '#E0E7FF' : '#1F2937',
+    border: modoOscuro ? 'rgba(99, 102, 241, 0.35)' : 'rgba(99, 102, 241, 0.18)',
+    cardBg: modoOscuro ? 'rgba(17, 24, 39, 0.82)' : 'rgba(255, 255, 255, 0.78)',
+    cardBorder: modoOscuro ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.12)'
   };
 
   return (
@@ -246,7 +329,7 @@ const MisAsignacionesDocente = ({
         <div className="schedule-sidebar">
           <div className="sidebar-header">
             <div className="app-logo">
-              <img src="/logo/image.png" alt="Logo I.E Peruano Japonés 7213" style={{height: '50px', width: 'auto', marginRight: '12px'}} />
+              <img src="/logo.png" alt="Logo I.E Peruano Japonés 7213" style={{height: '50px', width: 'auto', marginRight: '12px'}} />
               <div className="logo-text">
                  <h1>I.E Peruano Japonés</h1>
                 <span>7213</span>
@@ -328,20 +411,56 @@ const MisAsignacionesDocente = ({
 
         {/* Contenido principal */}
         <div className="schedule-content">
-          {/* Header */}
-          <div className="content-header">
-            <div className="header-title">
-              <h1>Mi Agenda Docente</h1>
-              <p>Gestiona tus clases de manera eficiente</p>
-            </div>
-            
-            <div className="day-indicator">
-              <span className="day-label">Hoy es</span>
-              <div className="current-day">
-                <div className="day-icon" style={{backgroundColor: getColorForDay(diaActual)}}>
-                  <FaCalendarDay />
+          <div className="dashboard-hero">
+            <div className="hero-background" />
+            <div className="hero-content">
+              <div className="content-header">
+                <div className="header-title">
+                  <h1>Mi Agenda Docente</h1>
+                  <p>Organiza tus clases con una vista clara y moderna</p>
                 </div>
-                <span className="day-name">{diaActual}</span>
+                <div className="day-indicator" style={{ borderColor: getColorForDay(diaActual) }}>
+                  <div className="day-icon animated" style={{ backgroundColor: getColorForDay(diaActual) }}>
+                    <FaCalendarDay />
+                    <span className="day-pulse" />
+                  </div>
+                  <div className="day-text">
+                    <span className="day-label">Hoy</span>
+                    <span className="day-name">{diaActual}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hero-summary">
+                <div className="summary-card">
+                  <div className="summary-icon primary">
+                    <FaCalendarCheck />
+                  </div>
+                  <div className="summary-body">
+                    <span className="summary-label">Clases activas</span>
+                    <span className="summary-value">{resumenRapido.totalClases}</span>
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-icon accent">
+                    <FaUsers />
+                  </div>
+                  <div className="summary-body">
+                    <span className="summary-label">Estudiantes vinculados</span>
+                    <span className="summary-value">
+                      {resumenRapido.totalEstudiantes != null ? resumenRapido.totalEstudiantes : '—'}
+                    </span>
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-icon neutral">
+                    <FaRegClock />
+                  </div>
+                  <div className="summary-body">
+                    <span className="summary-label">Horas semanales</span>
+                    <span className="summary-value">{resumenRapido.totalHoras}h</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -471,9 +590,18 @@ const MisAsignacionesDocente = ({
           {horarioActivo && !loading && !error && localAsignaciones.length > 0 && (
             <div className="calendar-view">
               <div className="calendar-header">
-                <button className="view-toggle" onClick={() => setShowCalendario(!showCalendario)}>
-                  {showCalendario ? 'Vista Compacta' : 'Vista Calendario'}
-                </button>
+                <div className="view-toggle" role="group" aria-label="Cambiar vista agenda">
+                  <span className={`toggle-label ${showCalendario ? 'active' : ''}`}>Agenda</span>
+                  <button
+                    type="button"
+                    className={`toggle-switch ${showCalendario ? 'agenda' : 'compacta'}`}
+                    onClick={() => setShowCalendario(!showCalendario)}
+                    aria-pressed={showCalendario}
+                  >
+                    <span className="toggle-thumb" />
+                  </button>
+                  <span className={`toggle-label ${!showCalendario ? 'active' : ''}`}>Compacta</span>
+                </div>
               </div>
               
               {showCalendario ? (
@@ -650,64 +778,74 @@ const MisAsignacionesDocente = ({
           --border-color: ${themeColors.border};
           --card-bg: ${themeColors.cardBg};
           --card-border: ${themeColors.cardBorder};
-          --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
-          --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
-          --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
-          --radius-sm: 8px;
-          --radius-md: 12px;
-          --radius-lg: 16px;
-          --transition: all 0.2s ease;
-          --sidebar-width: 260px;
+          --shadow-sm: 0 4px 12px rgba(99, 102, 241, 0.08);
+          --shadow-md: 0 16px 30px rgba(99, 102, 241, 0.12);
+          --shadow-lg: 0 28px 55px rgba(79, 70, 229, 0.18);
+          --radius-sm: 10px;
+          --radius-md: 16px;
+          --radius-lg: 22px;
+          --transition: all 0.25s ease;
+          --sidebar-width: 280px;
+          --gradient-start: rgba(99, 102, 241, 0.12);
+          --gradient-end: rgba(244, 244, 255, 0.92);
+          --bg-gradient: linear-gradient(140deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
         }
         
         .dark-theme {
-          --bg-color: #0f172a;
-          --bg-secondary: #1e293b;
-          --text-color: #e2e8f0;
-          --text-secondary: #94a3b8;
-          --border-color: #334155;
+          --bg-color: rgba(15, 23, 42, 0.94);
+          --bg-secondary: rgba(30, 32, 60, 0.82);
+          --text-color: #E0E7FF;
+          --text-secondary: rgba(203, 213, 225, 0.76);
+          --border-color: rgba(99, 102, 241, 0.32);
+          --bg-gradient: linear-gradient(160deg, rgba(17, 24, 39, 0.96) 0%, rgba(79, 70, 229, 0.55) 100%);
         }
         
         .light-theme {
-          --bg-color: #f8fafc;
-          --bg-secondary: #ffffff;
-          --text-color: #1e293b;
-          --text-secondary: #64748b;
-          --border-color: #e2e8f0;
+          --bg-color: rgba(255, 255, 255, 0.85);
+          --bg-secondary: rgba(255, 255, 255, 0.72);
+          --text-color: #1F2937;
+          --text-secondary: rgba(71, 85, 105, 0.7);
+          --border-color: rgba(99, 102, 241, 0.16);
+          --bg-gradient: linear-gradient(145deg, rgba(238, 242, 255, 0.9) 0%, rgba(250, 250, 255, 0.68) 100%);
         }
         
         .schedule-container {
           font-family: 'Inter', system-ui, -apple-system, sans-serif;
           color: var(--text-color);
-          background-color: var(--bg-color);
+          background: transparent;
           min-height: 100vh;
+          padding: 1.5rem;
+          position: relative;
         }
-        
+
         /* Layout */
         .schedule-layout {
           display: flex;
-          min-height: 100vh;
+          min-height: calc(100vh - 6rem);
+          background: rgba(255, 255, 255, 0.94);
+          border-radius: var(--radius-lg);
+          box-shadow: 0 14px 38px rgba(15, 23, 42, 0.1);
+          overflow: hidden;
+          border: 1px solid rgba(148, 163, 184, 0.2);
+          width: 100%;
         }
-        
+
         /* Sidebar */
         .schedule-sidebar {
           width: var(--sidebar-width);
-          background-color: var(--bg-secondary);
-          border-right: 1px solid var(--border-color);
+          background: rgba(248, 249, 255, 0.9);
+          border-right: 1px solid rgba(148, 163, 184, 0.2);
           display: flex;
           flex-direction: column;
-          height: 100vh;
-          position: sticky;
-          top: 0;
+          max-height: inherit;
           overflow-y: auto;
+          padding-bottom: 2rem;
+          box-shadow: inset -1px 0 0 rgba(99, 102, 241, 0.04);
         }
-        
+
         .sidebar-header {
           padding: 1.5rem;
           border-bottom: 1px solid var(--border-color);
-        }
-        
-        .app-logo {
           display: flex;
           align-items: center;
         }
@@ -765,19 +903,25 @@ const MisAsignacionesDocente = ({
           align-items: center;
           padding: 0.75rem;
           margin-bottom: 0.5rem;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-md);
           cursor: pointer;
           transition: var(--transition);
+          border: 1px solid transparent;
+          background: rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(10px);
         }
         
         .menu-item:hover {
-          background-color: rgba(99, 102, 241, 0.1);
+          background: rgba(99, 102, 241, 0.14);
+          border-color: rgba(99, 102, 241, 0.2);
         }
         
         .menu-item.active {
-          background-color: rgba(99, 102, 241, 0.15);
-          font-weight: 500;
-          color: var(--primary-color);
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(129, 140, 248, 0.28));
+          font-weight: 600;
+          color: white;
+          border-color: rgba(99, 102, 241, 0.35);
+          box-shadow: var(--shadow-sm);
         }
         
         .menu-icon {
@@ -790,12 +934,14 @@ const MisAsignacionesDocente = ({
         }
         
         .stats-container {
-          background-color: rgba(99, 102, 241, 0.08);
-          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.14);
+          border-radius: var(--radius-lg);
           padding: 1rem;
           display: grid;
           grid-template-columns: repeat(3, 1fr);
           gap: 0.5rem;
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          backdrop-filter: blur(16px);
         }
         
         .stat-item {
@@ -809,15 +955,16 @@ const MisAsignacionesDocente = ({
         }
         
         .stat-item:hover {
-          background-color: rgba(99, 102, 241, 0.1);
+          background: rgba(99, 102, 241, 0.16);
+          color: white;
         }
         
         .stat-icon {
-          width: 32px;
-          height: 32px;
-          background-color: rgba(99, 102, 241, 0.2);
-          color: var(--primary-color);
-          border-radius: 50%;
+          width: 36px;
+          height: 36px;
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.6), rgba(129, 140, 248, 0.6));
+          color: white;
+          border-radius: 12px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -858,17 +1005,19 @@ const MisAsignacionesDocente = ({
         .theme-toggle, .refresh-button {
           display: flex;
           align-items: center;
-          padding: 0.75rem;
-          border-radius: var(--radius-sm);
-          background-color: transparent;
-          border: 1px solid var(--border-color);
+          padding: 0.85rem 1.1rem;
+          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.16);
           color: var(--text-color);
           cursor: pointer;
           transition: var(--transition);
+          backdrop-filter: blur(14px);
         }
         
         .theme-toggle:hover, .refresh-button:hover {
-          background-color: rgba(99, 102, 241, 0.1);
+          background: rgba(99, 102, 241, 0.18);
+          color: white;
         }
         
         .theme-toggle svg, .refresh-button svg {
@@ -893,62 +1042,179 @@ const MisAsignacionesDocente = ({
         .schedule-content {
           flex: 1;
           padding: 2rem;
-          background-color: var(--bg-color);
+          background: transparent;
           overflow-y: auto;
         }
         
+        .dashboard-hero {
+          position: relative;
+          border-radius: var(--radius-lg);
+          overflow: hidden;
+          padding: 2.1rem;
+          margin-bottom: 2.5rem;
+          background: linear-gradient(125deg, rgba(99, 102, 241, 0.14), rgba(236, 233, 254, 0.55));
+          box-shadow: 0 18px 36px rgba(99, 102, 241, 0.16);
+          border: 1px solid rgba(255, 255, 255, 0.38);
+        }
+
+        .hero-background {
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(135deg, rgba(255, 255, 255, 0.55), rgba(99, 102, 241, 0.18));
+          backdrop-filter: blur(22px);
+          opacity: 0.9;
+        }
+
+        .hero-content {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 1.75rem;
+        }
+
         .content-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 2rem;
         }
-        
+
         .header-title h1 {
-          font-size: 1.75rem;
+          font-size: 2rem;
           font-weight: 700;
-          margin: 0 0 0.5rem 0;
+          margin: 0 0 0.75rem 0;
+          letter-spacing: -0.02em;
         }
-        
+
         .header-title p {
           margin: 0;
-          opacity: 0.7;
+          opacity: 0.8;
+          font-size: 0.95rem;
         }
-        
+
         .day-indicator {
           display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-        }
-        
-        .day-label {
-          font-size: 0.85rem;
-          opacity: 0.7;
-          margin-bottom: 0.25rem;
-        }
-        
-        .current-day {
-          display: flex;
           align-items: center;
-          background-color: var(--bg-secondary);
-          padding: 0.5rem 1rem;
-          border-radius: var(--radius-sm);
+          gap: 1rem;
+          padding: 0.75rem 1.25rem;
+          border: 1px solid currentColor;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.18);
+          color: var(--text-color);
           box-shadow: var(--shadow-sm);
         }
-        
+
+        .day-text {
+          display: flex;
+          flex-direction: column;
+          line-height: 1.1;
+        }
+
+        .day-label {
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.18em;
+          opacity: 0.7;
+        }
+
+        .day-name {
+          font-weight: 600;
+          font-size: 1.1rem;
+          letter-spacing: 0.03em;
+        }
+
         .day-icon {
-          width: 30px;
-          height: 30px;
+          position: relative;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          margin-right: 0.75rem;
+          color: white;
+          box-shadow: 0 12px 24px rgba(99, 102, 241, 0.25);
+        }
+
+        .day-icon.animated {
+          animation: float 3s ease-in-out infinite;
+        }
+
+        .day-pulse {
+          position: absolute;
+          inset: 0;
+          border-radius: 50%;
+          border: 2px solid rgba(255, 255, 255, 0.35);
+          animation: pulse 1.8s ease-out infinite;
+        }
+
+        @keyframes float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
+        }
+
+        @keyframes pulse {
+          0% { transform: scale(0.85); opacity: 0.75; }
+          70% { transform: scale(1.1); opacity: 0; }
+          100% { opacity: 0; }
+        }
+
+        .hero-summary {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 1rem;
+        }
+
+        .summary-card {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1rem 1.25rem;
+          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.22);
+          box-shadow: var(--shadow-sm);
+          backdrop-filter: blur(22px);
+          border: 1px solid rgba(255, 255, 255, 0.24);
+        }
+
+        .summary-icon {
+          width: 46px;
+          height: 46px;
+          border-radius: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           color: white;
         }
-        
-        .day-name {
-          font-weight: 600;
+
+        .summary-icon.primary {
+          background: linear-gradient(135deg, #6366F1, #818CF8);
+        }
+
+        .summary-icon.accent {
+          background: linear-gradient(135deg, #8B5CF6, #C084FC);
+        }
+
+        .summary-icon.neutral {
+          background: linear-gradient(135deg, #1E40AF, #4F46E5);
+        }
+
+        .summary-body {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .summary-label {
+          font-size: 0.78rem;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          opacity: 0.7;
+        }
+
+        .summary-value {
+          font-size: 1.4rem;
+          font-weight: 700;
+          letter-spacing: -0.01em;
         }
         
         /* Estado de carga */
@@ -1062,22 +1328,69 @@ const MisAsignacionesDocente = ({
         
         .calendar-header {
           display: flex;
-          justify-content: flex-end;
-          margin-bottom: 1rem;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1.5rem;
         }
-        
+
         .view-toggle {
-          background-color: var(--bg-secondary);
-          border: 1px solid var(--border-color);
-          color: var(--text-color);
-          padding: 0.5rem 1rem;
-          border-radius: var(--radius-sm);
-          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.35rem 0.6rem;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.18);
+          border: 1px solid rgba(255, 255, 255, 0.28);
+          box-shadow: var(--shadow-sm);
+          backdrop-filter: blur(14px);
+        }
+
+        .toggle-label {
+          font-size: 0.85rem;
+          opacity: 0.6;
           transition: var(--transition);
         }
-        
-        .view-toggle:hover {
-          background-color: rgba(99, 102, 241, 0.1);
+
+        .toggle-label.active {
+          opacity: 1;
+          font-weight: 600;
+          color: var(--primary-color);
+        }
+
+        .toggle-switch {
+          position: relative;
+          width: 54px;
+          height: 28px;
+          background: rgba(99, 102, 241, 0.25);
+          border-radius: 999px;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          transition: var(--transition);
+          box-shadow: inset 0 4px 12px rgba(79, 70, 229, 0.18);
+        }
+
+        .toggle-switch.agenda {
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(129, 140, 248, 0.65));
+        }
+
+        .toggle-thumb {
+          position: absolute;
+          top: 3px;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: white;
+          transition: var(--transition);
+          box-shadow: 0 8px 16px rgba(99, 102, 241, 0.28);
+        }
+
+        .toggle-switch.agenda .toggle-thumb {
+          left: 4px;
+        }
+
+        .toggle-switch.compacta .toggle-thumb {
+          left: 28px;
         }
         
         /* Calendario normal */
@@ -1088,11 +1401,13 @@ const MisAsignacionesDocente = ({
         }
         
         .calendar-day {
-          background-color: var(--bg-secondary);
+          background: rgba(255, 255, 255, 0.25);
           border-radius: var(--radius-md);
           overflow: hidden;
           box-shadow: var(--shadow-sm);
           height: fit-content;
+          backdrop-filter: blur(18px);
+          border: 1px solid rgba(255, 255, 255, 0.24);
         }
         
         .day-header {
@@ -1123,17 +1438,20 @@ const MisAsignacionesDocente = ({
         }
         
         .class-block {
-          padding: 1rem;
-          background-color: var(--bg-secondary);
-          border-radius: var(--radius-sm);
+          padding: 1.1rem;
+          background: rgba(255, 255, 255, 0.32);
+          border-radius: var(--radius-md);
           box-shadow: var(--shadow-sm);
           cursor: pointer;
           transition: var(--transition);
+          border: 1px solid rgba(255, 255, 255, 0.28);
+          backdrop-filter: blur(16px);
         }
         
         .class-block:hover {
-          transform: translateY(-3px);
+          transform: translateY(-6px) scale(1.01);
           box-shadow: var(--shadow-md);
+          background: rgba(255, 255, 255, 0.45);
         }
         
         .class-time {
@@ -1177,28 +1495,39 @@ const MisAsignacionesDocente = ({
         }
         
         .view-details {
-          background-color: transparent;
-          border: none;
+          background: rgba(99, 102, 241, 0.12);
+          border: 1px solid rgba(99, 102, 241, 0.22);
           color: var(--primary-color);
-          font-weight: 500;
-          padding: 0;
-          display: flex;
+          font-weight: 600;
+          padding: 0.35rem 0.85rem;
+          display: inline-flex;
           align-items: center;
+          gap: 0.5rem;
           cursor: pointer;
+          border-radius: 999px;
+          backdrop-filter: blur(12px);
+          transition: var(--transition);
         }
-        
+
+        .view-details:hover {
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(129, 140, 248, 0.25));
+          color: white;
+        }
+
         .view-details svg {
-          margin-left: 0.5rem;
-          font-size: 0.8rem;
+          margin-left: 0.25rem;
+          font-size: 0.9rem;
         }
         
         /* Vista compacta */
         .compact-view {
           display: flex;
           overflow-x: auto;
-          background-color: var(--bg-secondary);
+          background: rgba(255, 255, 255, 0.24);
           border-radius: var(--radius-md);
           box-shadow: var(--shadow-sm);
+          backdrop-filter: blur(18px);
+          border: 1px solid rgba(255, 255, 255, 0.22);
         }
         
         .time-column, .day-column {
@@ -1240,10 +1569,10 @@ const MisAsignacionesDocente = ({
         }
         
         .compact-class {
-          background-color: var(--primary-color);
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(129, 140, 248, 0.85));
           color: white;
           border-radius: var(--radius-sm);
-          padding: 0.25rem 0.5rem;
+          padding: 0.35rem 0.6rem;
           font-size: 0.75rem;
           cursor: pointer;
           height: 100%;
@@ -1251,6 +1580,12 @@ const MisAsignacionesDocente = ({
           display: flex;
           flex-direction: column;
           justify-content: center;
+          transition: var(--transition);
+        }
+
+        .compact-class:hover {
+          transform: translateY(-3px);
+          box-shadow: var(--shadow-sm);
         }
         
         .compact-time {
@@ -1355,17 +1690,20 @@ const MisAsignacionesDocente = ({
           color: white;
           border: none;
           padding: 0.75rem;
-          border-radius: var(--radius-sm);
+          border-top: 1px solid rgba(255, 255, 255, 0.22);
           font-weight: 500;
           display: flex;
           align-items: center;
-          justify-content: center;
-          cursor: pointer;
-        }
-        
-        .details-button svg {
-          margin-left: 0.5rem;
-        }
+          width: 100%;
+          background: rgba(255, 255, 255, 0.12);
+          color: white;
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          padding: 0.85rem;
+          border-radius: var(--radius-md);
+          font-weight: 600;
+          letter-spacing: 0.01em;
+          transition: var(--transition);
+          backdrop-filter: blur(12px);
         
         /* Modal de detalles */
         .course-details-modal {
@@ -1456,9 +1794,9 @@ const MisAsignacionesDocente = ({
           margin-right: 1rem;
           flex-shrink: 0;
         }
-        
-        .detail-content {
-          flex: 1;
+        .details-button:hover {
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(129, 140, 248, 0.35));
+          transform: translateY(-2px);
         }
         
         .detail-label {
@@ -1505,14 +1843,21 @@ const MisAsignacionesDocente = ({
         
         /* Media queries */
         @media (max-width: 1024px) {
+          .schedule-container {
+            padding: 1.5rem;
+          }
+
           .schedule-layout {
             flex-direction: column;
+            min-height: auto;
           }
           
           .schedule-sidebar {
             width: 100%;
             height: auto;
             position: relative;
+            border-right: none;
+            border-bottom: 1px solid var(--border-color);
           }
           
           .sidebar-menu {
@@ -1522,9 +1867,25 @@ const MisAsignacionesDocente = ({
           .stats-container {
             grid-template-columns: repeat(3, 1fr);
           }
+
+          .dashboard-hero {
+            padding: 1.75rem;
+          }
         }
         
         @media (max-width: 768px) {
+          .schedule-container {
+            padding: 1rem;
+          }
+
+          .dashboard-hero {
+            padding: 1.5rem;
+          }
+
+          .hero-summary {
+            grid-template-columns: 1fr;
+          }
+
           .content-header {
             flex-direction: column;
             align-items: flex-start;
@@ -1532,6 +1893,10 @@ const MisAsignacionesDocente = ({
           
           .day-indicator {
             align-items: flex-start;
+            margin-top: 1rem;
+          }
+
+          .view-toggle {
             margin-top: 1rem;
           }
           

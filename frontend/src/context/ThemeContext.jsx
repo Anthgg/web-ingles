@@ -11,6 +11,7 @@ const ThemeContext = createContext({
 });
 
 const STORAGE_KEY = 'goenglish:theme';
+const COLORS_STORAGE_KEY = 'goenglish:customColors';
 
 // Utilidades locales para lectura/escritura segura
 const isLikelyJson = (value) => {
@@ -56,6 +57,23 @@ const safeSetTheme = (theme) => {
   }
 };
 
+const safeGetColors = () => {
+  try {
+    const raw = window.localStorage.getItem(COLORS_STORAGE_KEY);
+    if (raw == null) return { primary: '#007bff', secondary: '#6c757d' };
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : { primary: '#007bff', secondary: '#6c757d' };
+  } catch (_) {
+    return { primary: '#007bff', secondary: '#6c757d' };
+  }
+};
+
+const safeSetColors = (colors) => {
+  try {
+    window.localStorage.setItem(COLORS_STORAGE_KEY, JSON.stringify(colors));
+  } catch (_) {}
+};
+
 export const ThemeProvider = ({ children }) => {
   const getInitialTheme = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -71,7 +89,7 @@ export const ThemeProvider = ({ children }) => {
 
   const [theme, setTheme] = useState(() => getInitialTheme());
   const [highContrast, setHighContrast] = useState(false);
-  const [customColors, setCustomColors] = useState({ primary: '#007bff', secondary: '#6c757d' });
+  const [customColors, setCustomColors] = useState(() => safeGetColors());
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -85,6 +103,24 @@ export const ThemeProvider = ({ children }) => {
     document.body.setAttribute('data-high-contrast', highContrast ? 'true' : 'false');
     safeSetTheme(theme);
   }, [theme, highContrast]);
+
+  // Aplicar colores personalizados al CSS
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const root = document.documentElement;
+    root.style.setProperty('--custom-primary', customColors.primary);
+    root.style.setProperty('--custom-secondary', customColors.secondary);
+    root.style.setProperty('--accent-primary', customColors.primary);
+    root.style.setProperty('--accent-secondary', customColors.secondary);
+    root.style.setProperty('--primary-color', customColors.primary);
+    root.style.setProperty('--secondary-color', customColors.secondary);
+    
+    // Guardar en localStorage
+    safeSetColors(customColors);
+  }, [customColors]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) {

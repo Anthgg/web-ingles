@@ -12,12 +12,14 @@
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
+    "dotenv-flow": "^4.1.0",
+    "envalid": "^7.3.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.14.1",
-    "speakeasy": "^2.0.0",
+    "nodemailer": "^7.0.10",
     "qrcode": "^1.5.4",
-    "dotenv-flow": "^4.1.0",
-    "envalid": "^7.3.1"
+    "speakeasy": "^2.0.0",
+    "twilio": "^5.10.4"
   }
 }

@@ -19,7 +19,29 @@ const { env, corsOrigins } = config;
 app.use(cors({ origin: corsOrigins.length ? corsOrigins : true, credentials: true }));
 app.use(express.json());
 
-const SECRET_KEY = env.JWT_SECRET;
+let cachedJwtSecret;
+const resolveJwtSecret = () => {
+  if (cachedJwtSecret) {
+    return cachedJwtSecret;
+  }
+
+  const candidate = typeof env.JWT_SECRET === 'string' ? env.JWT_SECRET.trim() : env.JWT_SECRET;
+
+  if (!candidate) {
+    throw new Error('JWT_SECRET no configurado. Define una clave compartida para todos los servicios.');
+  }
+
+  cachedJwtSecret = candidate;
+  return cachedJwtSecret;
+};
+
+let SECRET_KEY;
+try {
+  SECRET_KEY = resolveJwtSecret();
+} catch (error) {
+  console.error('JWT configuration error:', error.message);
+  process.exit(1);
+}
 
 // Pool de conexiones
 const pool = mysql.createPool({
@@ -188,6 +210,46 @@ app.get('/alumnos/:alumnoId/materias', authMiddleware(), asyncHandler(async (req
   );
 
   res.json({ ciclo_id: cicloId, materias: materiasRows });
+}));
+
+// ENDPOINT TEMPORAL: Configurar fechas para todos los cursos (SIN AUTENTICACIÓN TEMPORAL)
+app.post('/cursos/configurar-fechas-temp', asyncHandler(async (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.body;
+  
+  const inicio = fecha_inicio || '2025-10-01';
+  const fin = fecha_fin || '2025-12-31';
+  
+  await pool.execute(
+    'UPDATE cursos SET fecha_inicio = ?, fecha_fin = ? WHERE fecha_inicio IS NULL OR fecha_fin IS NULL',
+    [inicio, fin]
+  );
+  
+  const [cursos] = await pool.query('SELECT id, nombre, fecha_inicio, fecha_fin FROM cursos');
+  
+  res.json({ 
+    message: 'Fechas configuradas correctamente',
+    cursos: cursos
+  });
+}));
+
+// ENDPOINT TEMPORAL: Configurar fechas para todos los cursos
+app.post('/cursos/configurar-fechas', authMiddleware(['administrativo', 'admin']), asyncHandler(async (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.body;
+  
+  const inicio = fecha_inicio || '2025-10-01';
+  const fin = fecha_fin || '2025-12-31';
+  
+  await pool.execute(
+    'UPDATE cursos SET fecha_inicio = ?, fecha_fin = ? WHERE fecha_inicio IS NULL OR fecha_fin IS NULL',
+    [inicio, fin]
+  );
+  
+  const [cursos] = await pool.query('SELECT id, nombre, fecha_inicio, fecha_fin FROM cursos');
+  
+  res.json({ 
+    message: 'Fechas configuradas correctamente',
+    cursos: cursos
+  });
 }));
 
 /* ===================== Error handler único ===================== */

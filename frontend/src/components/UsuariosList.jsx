@@ -21,6 +21,10 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
   const [pendingPersonalUser, setPendingPersonalUser] = useState(null);
   const [personalDataCompleted, setPersonalDataCompleted] = useState(false);
   const [personalAlertUser, setPersonalAlertUser] = useState(null);
+  const [showActivationDialog, setShowActivationDialog] = useState(false);
+  const [activationUser, setActivationUser] = useState(null);
+  const [activationAction, setActivationAction] = useState(''); // 'activar' o 'desactivar'
+  const [deactivationReason, setDeactivationReason] = useState('');
   const itemsPerPage = 9;
 
   // Filtered and paginated users
@@ -130,6 +134,57 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
     if (userToDelete) {
       handleDelete(userToDelete.id);
       setUserToDelete(null);
+    }
+  };
+
+  // Funciones de activación/desactivación
+  const handleActivateUser = async (usuario) => {
+    setActivationUser(usuario);
+    setActivationAction('activar');
+    setShowActivationDialog(true);
+  };
+
+  const handleDeactivateUser = async (usuario) => {
+    setActivationUser(usuario);
+    setActivationAction('desactivar');
+    setDeactivationReason('');
+    setShowActivationDialog(true);
+  };
+
+  const confirmActivation = async () => {
+    if (!activationUser) return;
+
+    try {
+      const endpoint = activationAction === 'activar' ? 'activar' : 'desactivar';
+      const body = activationAction === 'desactivar' && deactivationReason 
+        ? { motivo: deactivationReason }
+        : {};
+
+      const res = await fetch(`http://localhost:3002/usuarios/${activationUser.id}/${endpoint}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || `Error al ${activationAction} usuario`);
+      }
+
+      showSuccess(data.message || `Usuario ${activationAction === 'activar' ? 'activado' : 'desactivado'} correctamente`);
+      setShowActivationDialog(false);
+      setActivationUser(null);
+      setDeactivationReason('');
+      
+      if (typeof fetchUsuarios === 'function') {
+        await Promise.resolve(fetchUsuarios());
+      }
+    } catch (err) {
+      showError(err.message);
     }
   };
 
@@ -483,12 +538,18 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
                 </div>
               </Card.Header>
               <Card.Body>
-                <div className="mb-3 text-center">
+                <div className="mb-3 d-flex justify-content-center gap-2">
                   <Badge 
                     bg={getRoleBadgeVariant(usuario.rol)}
                     className="role-badge"
                   >
                     {getRoleIcon(usuario.rol)} {usuario.rol}
+                  </Badge>
+                  <Badge 
+                    bg={usuario.activo ? 'success' : 'danger'}
+                    className="role-badge"
+                  >
+                    {usuario.activo ? '✓ Activo' : '✗ Inactivo'}
                   </Badge>
                 </div>
                 <div className="d-flex align-items-center mb-2">
@@ -498,9 +559,35 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
                     <span className="fw-semibold">{usuario.email}</span>
                   </div>
                 </div>
+                
+                {/* Botones de activación/desactivación */}
+                <div className="mt-3 pt-3 border-top">
+                  {usuario.activo ? (
+                    <Button
+                      variant="warning"
+                      size="sm"
+                      className="w-100"
+                      onClick={() => handleDeactivateUser(usuario)}
+                    >
+                      🔒 Desactivar Usuario
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="success"
+                      size="sm"
+                      className="w-100"
+                      onClick={() => handleActivateUser(usuario)}
+                    >
+                      🔓 Activar Usuario
+                    </Button>
+                  )}
+                </div>
+                
                 {/* Notificación si no tiene datos personales */}
                 {!usuario.datos_personales && (
-                  <NotificacionDatosPersonales onAgregar={() => setUsuarioDatosId(usuario.id)} />
+                  <div className="mt-2">
+                    <NotificacionDatosPersonales onAgregar={() => setUsuarioDatosId(usuario.id)} />
+                  </div>
                 )}
                 {/* Formulario de datos personales si se selecciona */}
                 {usuarioDatosId === usuario.id && (
@@ -510,11 +597,6 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
                     onError={showError}
                   />
                 )}
-                <div className="mt-3 pt-3 border-top">
-                  <small className="text-muted">
-                    Usuario activo en el sistema
-                  </small>
-                </div>
               </Card.Body>
             </Card>
           </Col>
@@ -768,6 +850,85 @@ const UsuariosList = ({ usuarios, token, fetchUsuarios, showError, showSuccess }
         cancelText="Cancelar"
         type="danger"
       />
+
+      {/* Activation/Deactivation Dialog */}
+      <Modal
+        show={showActivationDialog}
+        onHide={() => {
+          setShowActivationDialog(false);
+          setActivationUser(null);
+          setDeactivationReason('');
+        }}
+        centered
+        size="md"
+      >
+        <Modal.Header closeButton className={activationAction === 'desactivar' ? 'bg-warning' : 'bg-success text-white'}>
+          <Modal.Title>
+            {activationAction === 'activar' ? '🔓 Activar Usuario' : '🔒 Desactivar Usuario'}
+          </Modal.Title>
+        </Modal.Header>
+        
+        <Modal.Body className="p-4">
+          <p className="mb-3">
+            {activationAction === 'activar' ? (
+              <>¿Estás seguro de que deseas <strong>activar</strong> al usuario <strong>{activationUser?.nombre}</strong>?</>
+            ) : (
+              <>¿Estás seguro de que deseas <strong>desactivar</strong> al usuario <strong>{activationUser?.nombre}</strong>?</>
+            )}
+          </p>
+
+          {activationAction === 'activar' && (
+            <Alert variant="success">
+              <small>
+                Al activar este usuario, podrá iniciar sesión y acceder al sistema nuevamente.
+              </small>
+            </Alert>
+          )}
+
+          {activationAction === 'desactivar' && (
+            <>
+              <Alert variant="warning">
+                <small>
+                  Al desactivar este usuario, no podrá iniciar sesión en el sistema hasta que sea reactivado.
+                </small>
+              </Alert>
+              
+              <Form.Group className="mb-3">
+                <Form.Label className="fw-semibold">Motivo de desactivación (opcional)</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={3}
+                  value={deactivationReason}
+                  onChange={(e) => setDeactivationReason(e.target.value)}
+                  placeholder="Ej: Suspensión temporal, incumplimiento de normas, solicitud del usuario, etc."
+                />
+                <Form.Text className="text-muted">
+                  Este motivo quedará registrado en el historial del usuario.
+                </Form.Text>
+              </Form.Group>
+            </>
+          )}
+
+          <div className="d-flex gap-3 justify-content-end mt-4">
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setShowActivationDialog(false);
+                setActivationUser(null);
+                setDeactivationReason('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              variant={activationAction === 'activar' ? 'success' : 'warning'}
+              onClick={confirmActivation}
+            >
+              {activationAction === 'activar' ? '✓ Confirmar Activación' : '⚠ Confirmar Desactivación'}
+            </Button>
+          </div>
+        </Modal.Body>
+      </Modal>
     </Container>
   );
 };

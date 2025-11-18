@@ -1,5 +1,4 @@
 import React from 'react';
-import { Layout, Navbar } from '../../components/ui';
 import useDashboardData from '../../hooks/useDashboardData';
 import TeacherDashboard from '../../docente/index.jsx';
 
@@ -16,57 +15,42 @@ const TeacherPage = () => {
       clases,
       asistencias,
       calificaciones,
-      asignaciones,
+      asignacionesDocente, // Usamos asignacionesDocente para profesores
     },
     setActiveModule,
     showError,
     showSuccess,
     logout,
     updateTwoFactorStatus,
+    fetchAsistenciasDocente,
   } = useDashboardData();
 
   if (!user) {
     return null;
   }
 
-  const brand = (
-    <div>
-      <span className="fw-semibold">Panel Docente</span>
-      <small className="d-block text-muted" style={{ fontSize: '0.75rem' }}>
-        {user.nombre}
-      </small>
-    </div>
-  );
-
-  const actions = (
-    <button type="button" className="btn btn-outline-danger btn-sm" onClick={logout}>
-      Cerrar sesión
-    </button>
-  );
-
   return (
-    <Layout navbar={<Navbar brand={brand} actions={actions} />}>
-      <TeacherDashboard
-        userInfo={user}
-        activeModule={activeModule}
-        setActiveModule={setActiveModule}
-        onLogout={logout}
-        loading={loading}
-        error={error}
-        success={success}
-        setError={showError}
-        setSuccess={showSuccess}
-        usuarios={usuarios}
-        clases={clases}
-        asistencias={asistencias}
-        calificaciones={calificaciones}
-        asignaciones={asignaciones}
-        token={token}
-        showError={showError}
-        showSuccess={showSuccess}
-        onTwoFactorStatusChange={updateTwoFactorStatus}
-      />
-    </Layout>
+    <TeacherDashboard
+      userInfo={user}
+      activeModule={activeModule}
+      setActiveModule={setActiveModule}
+      onLogout={logout}
+      loading={loading}
+      error={error}
+      success={success}
+      setError={showError}
+      setSuccess={showSuccess}
+      usuarios={usuarios}
+      clases={clases}
+      asistencias={asistencias}
+      calificaciones={calificaciones}
+      asignaciones={asignacionesDocente} // Pasamos asignacionesDocente como asignaciones
+      token={token}
+      showError={showError}
+      showSuccess={showSuccess}
+      fetchAsistenciasDocente={fetchAsistenciasDocente}
+      onTwoFactorStatusChange={updateTwoFactorStatus}
+    />
   );
 };
 

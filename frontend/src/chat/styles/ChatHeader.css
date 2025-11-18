@@ -1,0 +1,276 @@
+/* ========================================
+   CHAT HEADER - Estilos mejorados
+   ======================================== */
+
+.chat-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 16px 20px;
+  border-bottom: none;
+  flex-shrink: 0;
+  z-index: 50;
+  position: relative;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.chat-header-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 100%;
+}
+
+/* Botón volver (móvil) */
+.chat-header-back-btn {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  border: none;
+  color: white;
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+}
+
+.chat-header-back-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.1) translateX(-2px);
+}
+
+.chat-header-back-btn:active {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(0.95);
+}
+
+/* Usuario/Grupo info */
+.chat-header-user {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+}
+
+.chat-header-user:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateX(4px);
+}
+
+.chat-header-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+  color: white;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%);
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s ease;
+}
+
+.chat-header-user:hover .chat-header-avatar {
+  transform: scale(1.1);
+}
+
+.chat-header-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.chat-header-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-header-name {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.3px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.chat-header-status {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  margin: 2px 0 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Título simple (sin sala seleccionada) */
+.chat-header-title {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Botón de información */
+.chat-header-info-btn {
+  background: none;
+  border: none;
+  color: white;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+
+.chat-header-info-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.chat-header-info-btn:active,
+.chat-header-info-btn.active {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.chat-header-menu {
+  position: relative;
+}
+
+.chat-header-menu-btn {
+  background: none;
+  border: none;
+  color: white;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+
+.chat-header-menu-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.chat-header-menu-btn:active {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.chat-header-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  background-color: #ffffff;
+  color: #111827;
+  border-radius: 8px;
+  min-width: 180px;
+  padding: 6px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-header-dropdown button {
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.chat-header-dropdown button:hover {
+  background-color: #f3f4f6;
+}
+
+.chat-header-dropdown-danger {
+  color: #ef4444;
+}
+
+.chat-header-dropdown-danger:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+}
+
+/* ========================================
+   RESPONSIVE - Móvil
+   ======================================== */
+
+@media (max-width: 768px) {
+  .chat-header {
+    padding: 10px 12px;
+  }
+
+  .chat-header-back-btn {
+    display: flex;
+  }
+
+  .chat-header-info-btn {
+    display: none;
+  }
+
+  .chat-header-actions {
+    gap: 2px;
+  }
+
+  .chat-header-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+
+  .chat-header-name {
+    font-size: 15px;
+  }
+
+  .chat-header-status {
+    font-size: 12px;
+  }
+}
+
+/* Desktop: ocultar botón volver */
+@media (min-width: 769px) {
+  .chat-header-back-btn {
+    display: none;
+  }
+}

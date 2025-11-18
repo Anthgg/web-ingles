@@ -37,7 +37,29 @@ app.use(
 );
 app.use(express.json());
 
-const SECRET_KEY = env.JWT_SECRET;
+let cachedJwtSecret;
+const resolveJwtSecret = () => {
+  if (cachedJwtSecret) {
+    return cachedJwtSecret;
+  }
+
+  const candidate = typeof env.JWT_SECRET === 'string' ? env.JWT_SECRET.trim() : env.JWT_SECRET;
+
+  if (!candidate) {
+    throw new Error('JWT_SECRET no configurado. Define una clave compartida para todos los servicios.');
+  }
+
+  cachedJwtSecret = candidate;
+  return cachedJwtSecret;
+};
+
+let SECRET_KEY;
+try {
+  SECRET_KEY = resolveJwtSecret();
+} catch (error) {
+  console.error('JWT configuration error:', error.message);
+  process.exit(1);
+}
 const TWO_FA_ENCRYPTION_KEY = env.TWO_FA_ENCRYPTION_KEY || 'cambia_esta_clave_para_2fa_seguro';
 const TWO_FACTOR_LOGIN_ENABLED = env.TWO_FACTOR_LOGIN_ENABLED; // Activo por defecto; poner en 'false' para desactivar temporalmente
 
@@ -165,34 +187,65 @@ function getUserByEmail(email) {
 }
 
 async function ensureProviders() {
-  if (!twilioClient && env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
+  const twilioSid = env.TWILIO_ACCOUNT_SID?.trim();
+  const twilioToken = env.TWILIO_AUTH_TOKEN?.trim();
+  
+  if (!twilioClient && twilioSid && twilioToken) {
     try {
-      twilioClient = require('twilio')(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
+      twilioClient = require('twilio')(twilioSid, twilioToken);
+      console.log('[Auth Service] Twilio SMS configurado correctamente');
     } catch (e) {
-      // noop: el reporte se hará si se intenta enviar SMS sin cliente válido
+      console.error('[Auth Service] Error inicializando Twilio:', e.message);
     }
   }
+  
   if (!nodemailer) {
-    try { nodemailer = require('nodemailer'); } catch (e) {}
+    try { 
+      nodemailer = require('nodemailer');
+      console.log('[Auth Service] Nodemailer configurado correctamente');
+    } catch (e) {
+      console.error('[Auth Service] Error cargando nodemailer:', e.message);
+    }
   }
 }
 
 async function sendSms(to, body) {
   await ensureProviders();
-  if (!twilioClient || !env.TWILIO_FROM) throw new Error('SMS no disponible');
+  if (!twilioClient) throw new Error('Servicio SMS no configurado');
+  if (!env.TWILIO_FROM) throw new Error('Número de origen SMS no configurado');
+  if (!to) throw new Error('Número de destino no proporcionado');
   return await twilioClient.messages.create({ from: env.TWILIO_FROM, to, body });
 }
 
 async function sendEmail(to, subject, text) {
   await ensureProviders();
   if (!nodemailer) throw new Error('Email no disponible');
+  
+  // Convertir puerto a número y secure a boolean
+  const port = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 587;
+  const secure = env.SMTP_SECURE === 'true' || env.SMTP_SECURE === true;
+  
   const transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST || undefined,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_SECURE,
-    auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+    host: env.SMTP_HOST || 'smtp.gmail.com',
+    port: port,
+    secure: secure,
+    auth: env.SMTP_USER ? { 
+      user: env.SMTP_USER, 
+      pass: env.SMTP_PASS?.replace(/\s+/g, '') // Remover espacios de la contraseña
+    } : undefined,
   });
-  return await transporter.sendMail({ from: env.FROM_EMAIL || env.SMTP_USER, to, subject, text });
+  
+  try {
+    return await transporter.sendMail({ 
+      from: env.FROM_EMAIL || env.SMTP_USER, 
+      to, 
+      subject, 
+      text 
+    });
+  } catch (err) {
+    console.error('[Auth Service] Error enviando email:', err.message);
+    throw new Error(`Error enviando email: ${err.message}`);
+  }
 }
 
 app.post('/login', (req, res) => {
@@ -208,7 +261,7 @@ app.post('/login', (req, res) => {
   }
 
   connection.query(
-    'SELECT id, nombre, rol, email, password, two_fa_secret FROM usuarios WHERE email = ? LIMIT 1',
+    'SELECT id, nombre, rol, email, password, two_fa_secret, activo FROM usuarios WHERE email = ? LIMIT 1',
     [trimmedEmail],
     async (err, results) => {
       if (err) {
@@ -219,6 +272,15 @@ app.post('/login', (req, res) => {
       }
 
       const user = results[0];
+      
+      // Verificar si el usuario está activo
+      if (user.activo === false || user.activo === 0) {
+        return res.status(403).json({ 
+          error: 'Usuario desactivado',
+          message: 'Tu cuenta ha sido desactivada. Contacta al administrador para más información.'
+        });
+      }
+      
       const valid = await bcrypt.compare(password, user.password || '');
       if (!valid) {
         return res.status(401).json({ error: 'Contrase?a incorrecta' });
@@ -389,6 +451,17 @@ app.post('/auth/otp/send', async (req, res) => {
     }
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
+    // Validate phone number if SMS channel
+    if (channel === 'sms') {
+      if (!user.telefono || user.telefono.trim() === '') {
+        return res.status(400).json({ 
+          error: 'Número de teléfono no configurado',
+          needsPhone: true,
+          message: 'Debes configurar tu número de teléfono antes de recibir SMS'
+        });
+      }
+    }
+
     // cooldown
     const [last] = await new Promise((resolve, reject) => {
       connection.query('SELECT sent_at FROM user_otp WHERE user_id = ? ORDER BY id DESC LIMIT 1', [user.id], (err, results) => (err ? reject(err) : resolve(results || [])));
@@ -412,15 +485,14 @@ app.post('/auth/otp/send', async (req, res) => {
 
     try {
       if (channel === 'sms') {
-  const to = user.telefono || config.get('TEST_SMS_TO', '');
-        if (!to) throw new Error('SMS no disponible');
-        await sendSms(to, `Tu código OTP es: ${code}. Expira en ${OTP_TTL_MINUTES} min.`);
+        // El teléfono ya fue validado antes, podemos usarlo directamente
+        await sendSms(user.telefono, `Tu código OTP es: ${code}. Expira en ${OTP_TTL_MINUTES} min.`);
       } else {
         await sendEmail(user.email, 'Tu código OTP', `Tu código OTP es: ${code}. Expira en ${OTP_TTL_MINUTES} min.`);
       }
     } catch (deliverErr) {
       console.error('OTP delivery error:', deliverErr.message);
-      return res.status(503).json({ error: `No se pudo enviar por ${channel}` });
+      return res.status(503).json({ error: `No se pudo enviar por ${channel}: ${deliverErr.message}` });
     }
 
     res.json({ ok: true, ttlMinutes: OTP_TTL_MINUTES, cooldownSeconds: SEND_COOLDOWN_SECONDS });
@@ -597,6 +669,84 @@ app.post('/2fa/verify-login', (req, res) => {
   });
 });
 
+// PUT /user/phone - Actualizar teléfono del usuario
+app.put('/user/phone', authenticate, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { telefono } = req.body || {};
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+
+    if (!telefono || typeof telefono !== 'string') {
+      return res.status(400).json({ error: 'Número de teléfono requerido' });
+    }
+
+    // Validar formato internacional básico (+1234567890)
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    const cleanPhone = telefono.trim();
+    
+    if (!phoneRegex.test(cleanPhone)) {
+      return res.status(400).json({ 
+        error: 'Formato de teléfono inválido',
+        message: 'Usa formato internacional: +1234567890'
+      });
+    }
+
+    // Actualizar en la base de datos
+    await new Promise((resolve, reject) => {
+      connection.query(
+        'UPDATE usuarios SET telefono = ? WHERE id = ?',
+        [cleanPhone, userId],
+        (err, result) => {
+          if (err) return reject(err);
+          resolve(result);
+        }
+      );
+    });
+
+    res.json({ 
+      ok: true, 
+      message: 'Teléfono actualizado correctamente',
+      telefono: cleanPhone
+    });
+  } catch (error) {
+    console.error('Error actualizando teléfono:', error);
+    res.status(500).json({ error: 'Error interno al actualizar teléfono' });
+  }
+});
+
+// GET /user/phone - Obtener teléfono del usuario
+app.get('/user/phone', authenticate, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario no autenticado' });
+    }
+
+    const [user] = await new Promise((resolve, reject) => {
+      connection.query(
+        'SELECT telefono FROM usuarios WHERE id = ? LIMIT 1',
+        [userId],
+        (err, results) => {
+          if (err) return reject(err);
+          resolve(results || []);
+        }
+      );
+    });
+
+    res.json({ 
+      telefono: user?.telefono || null,
+      hasTelefono: Boolean(user?.telefono)
+    });
+  } catch (error) {
+    console.error('Error obteniendo teléfono:', error);
+    res.status(500).json({ error: 'Error interno al obtener teléfono' });
+  }
+});
+
 // Health + routes debug helpers
 app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'auth-service' });
@@ -622,4 +772,27 @@ app.get('/_debug/routes', (req, res) => {
   }
 });
 
-app.listen(3001, () => console.log('Auth Service corriendo en http://localhost:3001'));
+app.listen(3001, async () => {
+  console.log('Auth Service corriendo en http://localhost:3001');
+  
+  // Inicializar proveedores y mostrar configuración
+  await ensureProviders();
+  
+  // Verificar configuración de Twilio
+  if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM) {
+    console.log('[Auth Service] ✓ Twilio SMS: Configurado');
+    console.log(`[Auth Service]   - Account SID: ${env.TWILIO_ACCOUNT_SID.substring(0, 10)}...`);
+    console.log(`[Auth Service]   - From Number: ${env.TWILIO_FROM}`);
+  } else {
+    console.log('[Auth Service] ⚠ Twilio SMS: NO configurado (las variables están vacías)');
+  }
+  
+  // Verificar configuración de SMTP
+  if (env.SMTP_HOST && env.SMTP_USER) {
+    console.log('[Auth Service] ✓ SMTP Email: Configurado');
+    console.log(`[Auth Service]   - Host: ${env.SMTP_HOST}:${env.SMTP_PORT}`);
+    console.log(`[Auth Service]   - User: ${env.SMTP_USER}`);
+  } else {
+    console.log('[Auth Service] ⚠ SMTP Email: NO configurado');
+  }
+});

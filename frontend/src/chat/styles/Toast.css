@@ -1,0 +1,207 @@
+/* ========================================
+   TOAST - Notificaciones flotantes
+   ======================================== */
+
+.toast-container {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.toast {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 320px;
+  max-width: 450px;
+  pointer-events: all;
+  animation: toastSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 2px solid transparent;
+  backdrop-filter: blur(10px);
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.toast-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.toast-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-message {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.5;
+  letter-spacing: 0.2px;
+}
+
+.toast-close {
+  background: rgba(0, 0, 0, 0.05);
+  border: none;
+  color: #6b7280;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  font-weight: 300;
+}
+
+.toast-close:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: #374151;
+  transform: scale(1.1);
+}
+
+.toast-close:active {
+  transform: scale(0.95);
+}
+
+/* Tipos de toast */
+
+/* Info (default) */
+.toast-info {
+  border-color: rgba(102, 126, 234, 0.3);
+  background: linear-gradient(to right, rgba(102, 126, 234, 0.05), white);
+}
+
+.toast-info .toast-icon {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.1));
+}
+
+/* Success */
+.toast-success {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(to right, rgba(16, 185, 129, 0.05), white);
+}
+
+.toast-success .toast-icon {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+}
+
+/* Error */
+.toast-error {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: linear-gradient(to right, rgba(239, 68, 68, 0.05), white);
+}
+
+.toast-error .toast-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
+}
+
+/* Warning */
+.toast-warning {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(to right, rgba(245, 158, 11, 0.05), white);
+}
+
+.toast-warning .toast-icon {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
+}
+
+/* User Left */
+.toast-user-left {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: linear-gradient(to right, rgba(239, 68, 68, 0.05), white);
+}
+
+.toast-user-left .toast-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
+}
+
+/* User Joined */
+.toast-user-joined {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(to right, rgba(16, 185, 129, 0.05), white);
+}
+
+.toast-user-joined .toast-icon {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+}
+
+/* Group Created */
+.toast-group-created {
+  border-color: rgba(102, 126, 234, 0.3);
+  background: linear-gradient(to right, rgba(102, 126, 234, 0.05), white);
+}
+
+.toast-group-created .toast-icon {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.1));
+}
+
+/* User Removed */
+.toast-user-removed {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: linear-gradient(to right, rgba(239, 68, 68, 0.05), white);
+}
+
+.toast-user-removed .toast-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
+}
+
+/* ========================================
+   RESPONSIVE
+   ======================================== */
+
+@media (max-width: 768px) {
+  .toast-container {
+    top: 16px;
+    right: 16px;
+    left: 16px;
+    align-items: stretch;
+  }
+
+  .toast {
+    min-width: auto;
+    max-width: none;
+    width: 100%;
+  }
+
+  @keyframes toastSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-100%) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+}

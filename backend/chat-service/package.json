@@ -15,6 +15,9 @@
     "mysql2": "^3.14.1",
     "dotenv-flow": "^4.1.0",
     "envalid": "^7.3.1",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "jsonwebtoken": "^9.0.2",
+    "mime-types": "^2.1.35",
+    "multer": "^2.0.0"
   }
 }

@@ -3,6 +3,10 @@ const cors = require('cors');
 const { str } = require('envalid');
 const crypto = require('node:crypto');
 const { createConfig } = require('../config');
+const PDFDocument = require('pdfkit');
+const path = require('path');
+const fs = require('fs');
+const axios = require('axios');
 const {
   createLogger,
   httpLogger,
@@ -50,10 +54,48 @@ app.use(
 app.use(express.json());
 app.use(httpLogger({ logger }));
 
-const SECRET_KEY =
-  config.get('REGISTRY_JWT_SECRET') ||
-  config.get('AUTH_JWT_SECRET') ||
-  env.JWT_SECRET;
+let cachedJwtSecret;
+const resolveJwtSecret = () => {
+  if (cachedJwtSecret) {
+    return cachedJwtSecret;
+  }
+
+  const candidates = [
+    ['REGISTRY_JWT_SECRET', config.get('REGISTRY_JWT_SECRET')],
+    ['AUTH_JWT_SECRET', config.get('AUTH_JWT_SECRET')],
+    ['JWT_SECRET', env.JWT_SECRET],
+  ]
+    .map(([label, value]) => {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed ? [label, trimmed] : null;
+      }
+      return value ? [label, value] : null;
+    })
+    .filter(Boolean);
+
+  if (!candidates.length) {
+    throw new Error('JWT_SECRET no configurado. Define una clave compartida para todos los servicios.');
+  }
+
+  const uniqueValues = [...new Set(candidates.map(([, value]) => value))];
+
+  if (uniqueValues.length > 1) {
+    const labels = candidates.map(([label]) => label).join(', ');
+    throw new Error(`${labels} no coinciden. Usa un solo secreto compartido.`);
+  }
+
+  cachedJwtSecret = uniqueValues[0];
+  return cachedJwtSecret;
+};
+
+let SECRET_KEY;
+try {
+  SECRET_KEY = resolveJwtSecret();
+} catch (error) {
+  logger.error({ err: error }, 'JWT configuration error');
+  process.exit(1);
+}
 
 const DNI_API_URL = config.get('REGISTRY_DNI_API_URL');
 const DNI_API_TOKEN = config.get('REGISTRY_DNI_API_TOKEN');
@@ -62,10 +104,6 @@ const DNI_APISNETPE_TOKEN = config.get('REGISTRY_DNI_APISNETPE_TOKEN');
 const DNI_APIPERUDEV_TOKEN = config.get('REGISTRY_DNI_APIPERUDEV_TOKEN');
 const DNI_ENABLE_FALLBACK = (config.get('REGISTRY_DNI_ENABLE_FALLBACK') || 'true').toString().toLowerCase() !== 'false';
 const DNI_FAKE_ON_FAIL = (config.get('REGISTRY_DNI_FAKE_ON_FAIL') || 'true').toString().toLowerCase() !== 'false';
-
-if (!SECRET_KEY) {
-  logger.warn('JWT_SECRET no configurado: los endpoints protegidos fallarán al validar tokens.');
-}
 
 db.configure({
   host: env.DB_HOST,
@@ -117,6 +155,7 @@ const asyncHandler = (handler) => (req, res, next) => {
 const ensureAuthenticated = rbac([], { jwtSecret: SECRET_KEY });
 const ensureAdmin = rbac(['administrativo', 'admin'], { jwtSecret: SECRET_KEY });
 const ensureStudent = rbac(['alumno', 'estudiante'], { jwtSecret: SECRET_KEY });
+const ensureAdminOrTeacher = rbac(['administrativo', 'admin', 'profesor'], { jwtSecret: SECRET_KEY });
 
 const institutionSchema = z.object({
   nombre: z.string().min(1, 'Nombre de la institución requerido'),
@@ -223,6 +262,32 @@ const normalizeAsistencia = (value) => {
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return null;
   return Math.min(Math.max(numeric, 0), 100);
+};
+
+const slugify = (value, fallback = 'archivo') => {
+  const base = String(value || '').toLowerCase();
+  const cleaned = base
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+  return cleaned || fallback;
+};
+
+const formatReadableDate = (value) => {
+  if (!value) {
+    return '—';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toLocaleDateString('es-PE', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
 };
 
 const mapAcademicRecord = (record) => ({
@@ -695,6 +760,551 @@ const buildInstitutionPayload = ({ instituciones, personal, estudiantes }) => {
     estudiantes: estudiantesByInstitution[inst.id] || [],
   }));
 };
+
+/* ===================== Sistema de Reportes PDF ===================== */
+
+const REPORT_MODULES = {
+  usuarios: {
+    name: 'Usuarios',
+    endpoint: 'http://localhost:3002/usuarios',
+    headers: (token) => ({ Authorization: `Bearer ${token}` }),
+    dataKey: null,
+    columns: [
+      { key: 'id', label: 'ID', width: 40 },
+      { key: 'nombre', label: 'Nombre', width: 120 },
+      { key: 'email', label: 'Email', width: 150 },
+      { key: 'rol', label: 'Rol', width: 80 },
+      { key: 'estado', label: 'Estado', width: 60 },
+    ],
+    roleColors: {
+      admin: '#e74c3c',
+      profesor: '#3498db',
+      estudiante: '#2ecc71',
+      administrativo: '#9b59b6',
+    },
+  },
+  asistencias: {
+    name: 'Asistencias',
+    endpoint: 'http://localhost:3003/attendances',
+    headers: (token) => ({ Authorization: `Bearer ${token}` }),
+    dataKey: null,
+    columns: [
+      { key: 'id', label: 'ID', width: 40 },
+      { key: 'student_id', label: 'ID Estudiante', width: 90 },
+      { key: 'class_id', label: 'ID Clase', width: 70 },
+      { key: 'date', label: 'Fecha', width: 80 },
+      { key: 'status', label: 'Estado', width: 70 },
+      { key: 'notes', label: 'Notas', width: 100 },
+    ],
+  },
+  calificaciones: {
+    name: 'Calificaciones',
+    endpoint: 'http://localhost:3004/grades',
+    headers: (token) => ({ Authorization: `Bearer ${token}` }),
+    dataKey: null,
+    columns: [
+      { key: 'id', label: 'ID', width: 40 },
+      { key: 'student_id', label: 'ID Estudiante', width: 90 },
+      { key: 'assignment_id', label: 'ID Asignación', width: 90 },
+      { key: 'score', label: 'Nota', width: 50 },
+      { key: 'feedback', label: 'Retroalimentación', width: 150 },
+    ],
+  },
+  clases: {
+    name: 'Clases',
+    endpoint: 'http://localhost:3005/materias',
+    headers: (token) => ({ Authorization: `Bearer ${token}` }),
+    dataKey: null,
+    columns: [
+      { key: 'id', label: 'ID', width: 40 },
+      { key: 'nombre', label: 'Nombre', width: 150 },
+      { key: 'descripcion', label: 'Descripción', width: 200 },
+    ],
+  },
+  asignaciones: {
+    name: 'Asignaciones',
+    endpoint: 'http://localhost:3007/asignaciones',
+    headers: (token) => ({ Authorization: `Bearer ${token}` }),
+    dataKey: null,
+    columns: [
+      { key: 'id', label: 'ID', width: 40 },
+      { key: 'student_id', label: 'ID Estudiante', width: 90 },
+      { key: 'class_id', label: 'ID Clase', width: 70 },
+      { key: 'assignment_date', label: 'Fecha Asignación', width: 100 },
+    ],
+  },
+};
+
+async function fetchReportModuleData({ moduleKey, token, throwOnError = false }) {
+  const moduleConfig = REPORT_MODULES[moduleKey];
+
+  if (!moduleConfig) {
+    const error = new Error('Módulo no válido');
+    error.status = 400;
+    error.availableModules = Object.keys(REPORT_MODULES);
+    throw error;
+  }
+
+  if (!token) {
+    const error = new Error('Token no proporcionado');
+    error.status = 401;
+    throw error;
+  }
+
+  let data = [];
+
+  try {
+    const response = await axios.get(moduleConfig.endpoint, {
+      headers: typeof moduleConfig.headers === 'function'
+        ? moduleConfig.headers(token)
+        : moduleConfig.headers,
+    });
+
+    const payload = moduleConfig.dataKey
+      ? response.data?.[moduleConfig.dataKey]
+      : response.data;
+
+    data = Array.isArray(payload) ? payload : [];
+  } catch (error) {
+    logger.error(
+      { error: error.message, module: moduleKey },
+      'Error al obtener datos para reporte',
+    );
+
+    if (throwOnError) {
+      const status = error?.response?.status || 502;
+      const message =
+        error?.response?.data?.error || 'No fue posible obtener datos del módulo solicitado';
+      const requestError = new Error(message);
+      requestError.status = status;
+      throw requestError;
+    }
+
+    data = [];
+  }
+
+  return { moduleConfig, data };
+}
+
+function addInstitutionalHeader(doc, title, logoPath) {
+  const logoY = 40;
+
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, 50, logoY, { width: 100, height: 100 });
+  }
+
+  doc.fontSize(16)
+    .font('Helvetica-Bold')
+    .fillColor('#2c3e50')
+    .text('I.E. N.º 7213 Peruano Japonés', 165, logoY);
+
+  doc.fontSize(8).font('Helvetica').fillColor('#34495e');
+
+  const infoLines = [
+    'Código Modular: 0874198',
+    'RUC: 20503217032',
+    'Nivel: Primaria y Secundaria',
+    'Tipo de gestión: Pública (Gobierno)',
+    'UGEL: N.º 01 - San Juan de Miraflores (Lima Metropolitana)',
+    'Dirección: Av. 200 Millas s/n, Urbanización Pachacámac (IV Etapa / Sector 1)',
+    'Distrito: Villa El Salvador, Lima, Perú',
+    'Teléfono: (01) 293-4417',
+    'Correo electrónico: japones7213@hotmail.com',
+    'Referencia: Cerca al Parque Pachacámac, zona sur de Villa El Salvador',
+  ];
+
+  let infoY = logoY + 20;
+  const textOptions = { width: 360, lineGap: 1 };
+
+  infoLines.forEach((line) => {
+    doc.text(line, 165, infoY, textOptions);
+    infoY = doc.y + 4;
+  });
+
+  doc.fontSize(14)
+    .font('Helvetica-Bold')
+    .fillColor('#2c3e50')
+    .text(`Reporte: ${title}`, 50, Math.max(infoY + 15, logoY + 120));
+
+  return Math.max(infoY + 45, logoY + 150);
+}
+
+function addReportMetadata(doc, y, totalRecords, generatedBy) {
+  const now = new Date();
+  const fecha = now.toLocaleDateString('es-PE');
+  const hora = now.toLocaleTimeString('es-PE');
+
+  doc.fontSize(9)
+    .font('Helvetica')
+    .fillColor('#7f8c8d')
+    .text(`Fecha: ${fecha}`, 50, y)
+    .text(`Hora: ${hora}`, 200, y)
+    .text(`Total de registros: ${totalRecords}`, 350, y);
+
+  doc.fontSize(8)
+    .font('Helvetica-Oblique')
+    .fillColor('#95a5a6')
+    .text(`Generado por: ${generatedBy.nombre} (${generatedBy.rol})`, 50, y + 15);
+
+  return y + 35;
+}
+
+function drawTableRow(doc, y, columns, data, options = {}) {
+  const { isHeader = false, bgColor = null, textColor = '#2c3e50' } = options;
+  let x = 50;
+  const rowHeight = 25;
+
+  if (bgColor) {
+    doc.rect(50, y, 500, rowHeight).fill(bgColor);
+  }
+
+  doc.fillColor(textColor);
+  doc.font(isHeader ? 'Helvetica-Bold' : 'Helvetica');
+  doc.fontSize(isHeader ? 10 : 9);
+
+  columns.forEach((col) => {
+    const value = isHeader ? col.label : (data[col.key] ?? '-');
+    const text = String(value).substring(0, 30);
+    doc.text(text, x, y + 7, { width: col.width - 5, ellipsis: true });
+    x += col.width;
+  });
+
+  return y + rowHeight;
+}
+
+function streamModuleReportPdf({
+  res,
+  moduleKey,
+  moduleConfig,
+  data,
+  generatedBy,
+  filename,
+  title,
+}) {
+  const pdfTitle = title || moduleConfig.name || 'Reporte';
+  const rawFilename = filename || `${slugify(`${pdfTitle}-${Date.now()}`)}.pdf`;
+  const finalFilename = rawFilename.toLowerCase().endsWith('.pdf')
+    ? rawFilename
+    : `${rawFilename}.pdf`;
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${finalFilename}"`);
+
+  const doc = new PDFDocument({
+    size: 'A4',
+    margins: { top: 50, bottom: 50, left: 50, right: 50 },
+  });
+
+  doc.pipe(res);
+
+  const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
+  let currentY = addInstitutionalHeader(doc, pdfTitle, logoPath);
+
+  currentY = addReportMetadata(doc, currentY, data.length, generatedBy);
+
+  doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#bdc3c7');
+  currentY += 15;
+
+  currentY = drawTableRow(doc, currentY, moduleConfig.columns, {}, {
+    isHeader: true,
+    bgColor: '#2c3e50',
+    textColor: '#ffffff',
+  });
+
+  data.forEach((item, index) => {
+    if (currentY > 700) {
+      doc.addPage();
+      currentY = 50;
+
+      currentY = drawTableRow(doc, currentY, moduleConfig.columns, {}, {
+        isHeader: true,
+        bgColor: '#2c3e50',
+        textColor: '#ffffff',
+      });
+    }
+
+    const bgColor = index % 2 === 0 ? '#ecf0f1' : '#ffffff';
+    let textColor = '#2c3e50';
+
+    if (moduleKey === 'usuarios' && item.rol && moduleConfig.roleColors) {
+      textColor = moduleConfig.roleColors[item.rol] || '#2c3e50';
+    }
+
+    currentY = drawTableRow(doc, currentY, moduleConfig.columns, item, {
+      bgColor,
+      textColor,
+    });
+  });
+
+  const pageCount = doc.bufferedPageRange().count;
+  for (let i = 0; i < pageCount; i += 1) {
+    doc.switchToPage(i);
+    doc
+      .fontSize(8)
+      .font('Helvetica')
+      .fillColor('#95a5a6')
+      .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50, {
+        align: 'center',
+      });
+  }
+
+  doc.end();
+}
+
+app.get(
+  '/api/reports/:module.pdf',
+  ensureAuthenticated,
+  ensureAdmin,
+  asyncHandler(async (req, res) => {
+    const { module } = req.params;
+    const token = req.headers.authorization?.split(' ')[1];
+
+    try {
+      const { moduleConfig, data } = await fetchReportModuleData({ moduleKey: module, token });
+
+      const generatedBy = {
+        nombre: req.user?.nombre || req.user?.email || 'Usuario del sistema',
+        rol: req.user?.rol || 'Administrador',
+      };
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filenameBase = slugify(`reporte-${module}-${timestamp}`, 'reporte');
+
+      streamModuleReportPdf({
+        res,
+        moduleKey: module,
+        moduleConfig,
+        data,
+        generatedBy,
+        filename: `${filenameBase}.pdf`,
+      });
+    } catch (error) {
+      const status = error.status || 500;
+      const responseBody = {
+        error: error.message || 'Error generando reporte PDF',
+      };
+
+      if (error.availableModules) {
+        responseBody.availableModules = error.availableModules;
+      }
+
+      res.status(status).json(responseBody);
+    }
+  }),
+);
+
+app.get(
+  '/api/reports/asistencias/docente.pdf',
+  ensureAuthenticated,
+  ensureAdminOrTeacher,
+  asyncHandler(async (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    try {
+      const { moduleConfig, data } = await fetchReportModuleData({
+        moduleKey: 'asistencias',
+        token,
+        throwOnError: true,
+      });
+
+      const roleLabel = req.user?.rol || 'Docente';
+      const generatedBy = {
+        nombre: req.user?.nombre || req.user?.email || 'Usuario del sistema',
+        rol: roleLabel,
+      };
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filenameBase = slugify(`asistencias-${roleLabel}-${timestamp}`, 'reporte-asistencias');
+
+      streamModuleReportPdf({
+        res,
+        moduleKey: 'asistencias',
+        moduleConfig,
+        data,
+        generatedBy,
+        filename: `${filenameBase}.pdf`,
+        title: 'Reporte de Asistencias',
+      });
+    } catch (error) {
+      const status = error.status || 500;
+      const message = error.message || 'No fue posible generar el reporte de asistencias';
+      res.status(status).json({ error: message });
+    }
+  }),
+);
+
+app.get(
+  '/api/reports/asistencias/raw',
+  ensureAuthenticated,
+  ensureAdminOrTeacher,
+  asyncHandler(async (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    try {
+      const { moduleConfig, data } = await fetchReportModuleData({
+        moduleKey: 'asistencias',
+        token,
+        throwOnError: true,
+      });
+
+      res.json({
+        module: moduleConfig.name,
+        columns: moduleConfig.columns.map(({ key, label, width }) => ({ key, label, width })),
+        rows: data,
+        count: data.length,
+        generatedAt: new Date().toISOString(),
+        generatedBy: {
+          nombre: req.user?.nombre || req.user?.email || 'Usuario del sistema',
+          rol: req.user?.rol || 'Docente',
+        },
+      });
+    } catch (error) {
+      const status = error.status || 500;
+      const message = error.message || 'No fue posible obtener los datos de asistencias';
+      res.status(status).json({ error: message });
+    }
+  }),
+);
+
+app.get(
+  '/api/reports/examenes/:examenId.pdf',
+  ensureAuthenticated,
+  ensureAdminOrTeacher,
+  asyncHandler(async (req, res) => {
+    const { examenId } = req.params;
+    const numericId = Number(examenId);
+
+    if (!numericId) {
+      return res.status(400).json({ error: 'Identificador de examen inválido' });
+    }
+
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Token no proporcionado' });
+    }
+
+    let detail;
+    try {
+      const response = await axios.get(`http://localhost:3004/examenes/${numericId}/detalle`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      detail = response.data;
+    } catch (error) {
+      const status = error?.response?.status || 500;
+      const message = error?.response?.data?.error || 'No fue posible obtener los datos del examen';
+      logger.error({ examenId: numericId, error: error.message }, 'Error consultando calificaciones de examen');
+      return res.status(status).json({ error: message });
+    }
+
+    const examInfo = detail?.examen || {};
+    const participantes = Array.isArray(detail?.participantes) ? detail.participantes : [];
+    const promedio = detail?.promedio != null && !Number.isNaN(Number(detail.promedio))
+      ? Number(detail.promedio).toFixed(2)
+      : '—';
+    const totalEvaluados = detail?.totalEvaluados != null ? Number(detail.totalEvaluados) : 0;
+    const totalInscritos = detail?.totalInscritos != null ? Number(detail.totalInscritos) : participantes.length;
+
+    const fileBase = slugify(`${examInfo.nombre || 'examen'}-${examInfo.fecha || numericId}`, 'calificaciones-examen');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.pdf"`);
+
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 50, bottom: 50, left: 50, right: 50 },
+    });
+    doc.pipe(res);
+
+    const logoPath = path.join(__dirname, '../../frontend/public/logo.png');
+    let currentY = addInstitutionalHeader(doc, 'Calificaciones de examen', logoPath);
+
+    const generatedBy = {
+      nombre: req.user?.nombre || req.user?.email || 'Usuario del sistema',
+      rol: req.user?.rol || 'Docente',
+    };
+    currentY = addReportMetadata(doc, currentY, participantes.length, generatedBy);
+
+    doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#bdc3c7');
+    currentY += 18;
+
+    doc.font('Helvetica-Bold').fontSize(12).fillColor('#2c3e50');
+    doc.text(examInfo.nombre || 'Examen sin nombre', 50, currentY);
+    currentY += 16;
+
+    doc.font('Helvetica').fontSize(10).fillColor('#34495e');
+    doc.text(`Fecha: ${formatReadableDate(examInfo.fecha)}`, 50, currentY);
+    currentY += 14;
+    doc.text(`Curso: ${examInfo.curso_nombre || '—'}`, 50, currentY);
+    currentY += 14;
+    doc.text(`Promedio general: ${promedio}`, 50, currentY);
+    currentY += 14;
+    doc.text(`Calificaciones registradas: ${totalEvaluados} de ${totalInscritos}`, 50, currentY);
+    currentY += 20;
+
+    const columns = [
+      { key: 'nombre', label: 'Estudiante', width: 220 },
+      { key: 'email', label: 'Correo', width: 140 },
+      { key: 'nota', label: 'Nota', width: 60 },
+      { key: 'estado', label: 'Estado', width: 80 },
+    ];
+
+    currentY = drawTableRow(doc, currentY, columns, {}, {
+      isHeader: true,
+      bgColor: '#2c3e50',
+      textColor: '#ffffff',
+    });
+
+    participantes.forEach((participante, index) => {
+      if (currentY > 700) {
+        doc.addPage();
+        currentY = 50;
+        currentY = drawTableRow(doc, currentY, columns, {}, {
+          isHeader: true,
+          bgColor: '#2c3e50',
+          textColor: '#ffffff',
+        });
+      }
+
+      const row = {
+        nombre: participante.nombre || 'Estudiante sin nombre',
+        email: participante.email || '—',
+        nota:
+          participante.nota != null && !Number.isNaN(Number(participante.nota))
+            ? Number(participante.nota).toFixed(2)
+            : '—',
+        estado: participante.estado ? participante.estado.toUpperCase() : 'PENDIENTE',
+      };
+
+      const bgColor = index % 2 === 0 ? '#ecf0f1' : '#ffffff';
+      currentY = drawTableRow(doc, currentY, columns, row, { bgColor });
+    });
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i += 1) {
+      doc.switchToPage(i);
+      doc.fontSize(8)
+        .font('Helvetica')
+        .fillColor('#95a5a6')
+        .text(`Página ${i + 1} de ${pageCount}`, 50, doc.page.height - 50, { align: 'center' });
+    }
+
+    doc.end();
+  }),
+);
+
+app.get(
+  '/api/reports/modules',
+  ensureAuthenticated,
+  ensureAdmin,
+  asyncHandler(async (req, res) => {
+    const modules = Object.keys(REPORT_MODULES).map((key) => ({
+      id: key,
+      name: REPORT_MODULES[key].name,
+      endpoint: `/api/reports/${key}.pdf`,
+    }));
+
+    res.json({ modules });
+  }),
+);
 
 app.get(
   '/ministerio/forms',

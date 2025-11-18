@@ -12,6 +12,8 @@
     "axios": "^1.9.0",
     "boostrap": "^2.0.0",
     "bootstrap": "^5.3.6",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "jwt-decode": "^4.0.0",
     "lucide-react": "^0.513.0",
     "react": "^19.1.0",
@@ -22,10 +24,11 @@
     "react-scripts": "^5.0.1",
     "react-tsparticles": "^2.12.2",
     "recharts": "^3.2.1",
-    "socket.io-client": "^4.8.1",
+    "socket.io-client": "^4.5.4",
     "tsparticles": "^3.8.1",
     "tsparticles-slim": "^2.12.0",
-    "web-vitals": "^2.1.4"
+    "web-vitals": "^2.1.4",
+    "xlsx-js-style": "^1.2.0"
   },
   "scripts": {
     "prestart": "powershell -NoProfile -Command \"$p=(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess); if($p){Write-Host 'Liberando puerto 3000 (PID' $p ')'; Stop-Process -Id $p -Force -ErrorAction SilentlyContinue}\"",
@@ -51,5 +54,9 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6"
   }
 }

@@ -1,0 +1,107 @@
+:root {
+  --chat-header-height: 70px;
+  --chat-background: #f5f7fb;
+  --chat-panel-background: #ffffff;
+  --chat-panel-radius: 20px;
+  --chat-panel-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+}
+
+.chat-container {
+  min-height: 100vh;
+  background: var(--chat-background);
+  color: #1c1f27;
+  font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
+}
+
+.chat-body {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 360px;
+  gap: 1.5rem;
+  padding: calc(var(--chat-header-height) + 1.5rem) 1.5rem 1.5rem;
+  box-sizing: border-box;
+  transition: padding 0.25s ease, gap 0.25s ease;
+}
+
+.chat-panel {
+  background: var(--chat-panel-background);
+  border-radius: var(--chat-panel-radius);
+  box-shadow: var(--chat-panel-shadow);
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--chat-header-height) - 3rem);
+  overflow: hidden;
+  position: relative;
+}
+
+.chat-panel__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-panel--messages {
+  border-radius: var(--chat-panel-radius);
+}
+
+.chat-panel--hidden {
+  display: none;
+}
+
+.chat-body--mobile {
+  padding: calc(var(--chat-header-height) + 0.75rem) 0 0.75rem;
+}
+
+@media (max-width: 1280px) {
+  .chat-body {
+    grid-template-columns: 280px minmax(0, 1fr) 320px;
+    padding: calc(var(--chat-header-height) + 1.25rem) 1.25rem 1.25rem;
+  }
+}
+
+@media (max-width: 1100px) {
+  .chat-body {
+    grid-template-columns: 260px minmax(0, 1fr) 300px;
+  }
+}
+
+@media (max-width: 992px) {
+  .chat-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: calc(var(--chat-header-height) + 1rem) 1rem 1rem;
+  }
+
+  .chat-panel {
+    min-height: calc(100vh - var(--chat-header-height) - 2rem);
+    border-radius: 18px;
+  }
+}
+
+@media (max-width: 768px) {
+  .chat-container {
+    background: #ffffff;
+  }
+
+  .chat-body {
+    max-width: none;
+    padding: calc(var(--chat-header-height)) 0 0;
+  }
+
+  .chat-panel {
+    box-shadow: none;
+    border-radius: 0;
+    min-height: calc(100vh - var(--chat-header-height));
+  }
+
+  .chat-panel:not(.chat-panel--messages) {
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+  }
+
+  .chat-panel--messages {
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+  }
+}
