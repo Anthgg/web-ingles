@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inventario & DNI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <section class="auth" id="login-section">
+      <div class="card">
+        <h1>Inventario + DNI</h1>
+        <p>Acceso seguro con roles.</p>
+        <input id="login-usuario" type="text" placeholder="Correo o usuario" />
+        <input id="login-password" type="password" placeholder="Contraseña" />
+        <button id="btn-login">Iniciar sesión</button>
+        <p class="hint">Admin demo: admin@local / admin123</p>
+      </div>
+    </section>
+
+    <section class="dashboard hidden" id="dashboard">
+      <aside class="sidebar">
+        <div class="user-info">
+          <img id="user-avatar" src="https://ui-avatars.com/api/?name=Inventario" alt="avatar" />
+          <div>
+            <strong id="user-name">Usuario</strong>
+            <span id="user-role">Rol</span>
+          </div>
+        </div>
+        <nav>
+          <button class="nav-btn" data-target="panel-resumen">Resumen</button>
+          <button class="nav-btn" data-target="panel-productos">Inventario</button>
+          <button class="nav-btn" data-target="panel-movimientos">Movimientos</button>
+          <button class="nav-btn" data-target="panel-dni">Consulta DNI</button>
+          <button class="nav-btn admin-only" data-target="panel-usuarios">Usuarios</button>
+          <button id="btn-logout" class="nav-btn danger">Cerrar sesión</button>
+        </nav>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <h2 id="panel-title">Panel</h2>
+            <p>Controla tu inventario, usuarios y consultas de DNI</p>
+          </div>
+          <button id="btn-export">Exportar CSV</button>
+        </header>
+
+        <section id="panel-resumen" class="panel">
+          <div class="grid">
+            <div class="stat">
+              <p>Total productos</p>
+              <strong id="stat-total">0</strong>
+            </div>
+            <div class="stat warning">
+              <p>Stock bajo</p>
+              <strong id="stat-bajo">0</strong>
+            </div>
+            <div class="stat">
+              <p>Movimientos</p>
+              <strong id="stat-movs">0</strong>
+            </div>
+            <div class="stat">
+              <p>Consultas DNI</p>
+              <strong id="stat-dni">0</strong>
+            </div>
+          </div>
+          <div class="chart">
+            <h3>Top categorías</h3>
+            <div id="chart-categorias" class="bars"></div>
+          </div>
+        </section>
+
+        <section id="panel-productos" class="panel hidden">
+          <div class="actions">
+            <input id="buscar" type="search" placeholder="Buscar por nombre, SKU o proveedor" />
+            <select id="filtro-categoria">
+              <option value="">Todas las categorías</option>
+              <option value="Tecnología">Tecnología</option>
+              <option value="Oficina">Oficina</option>
+              <option value="Hogar">Hogar</option>
+            </select>
+            <select id="filtro-stock">
+              <option value="">Stock</option>
+              <option value="5">≤ 5 unidades</option>
+              <option value="10">≤ 10 unidades</option>
+            </select>
+            <button id="btn-nuevo">Nuevo producto</button>
+          </div>
+          <div class="table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>SKU</th><th>Proveedor</th><th>Ingreso</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="tabla-productos"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="panel-movimientos" class="panel hidden">
+          <div class="form-grid">
+            <input id="mov-producto" placeholder="ID producto" />
+            <select id="mov-tipo"><option value="entrada">Entrada</option><option value="salida">Salida</option></select>
+            <input id="mov-cantidad" type="number" placeholder="Cantidad" />
+            <input id="mov-desc" placeholder="Descripción" />
+            <button id="btn-mov">Registrar movimiento</button>
+          </div>
+          <div class="table">
+            <table>
+              <thead><tr><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Fecha</th></tr></thead>
+              <tbody id="tabla-movimientos"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="panel-dni" class="panel hidden">
+          <div class="form-grid">
+            <input id="dni-input" placeholder="Número de DNI" />
+            <button id="btn-dni">Consultar</button>
+            <div id="dni-resultado"></div>
+          </div>
+          <div class="table">
+            <table>
+              <thead><tr><th>DNI</th><th>Nombres</th><th>Apellidos</th><th>Estado</th><th>Fecha</th></tr></thead>
+              <tbody id="tabla-dni"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="panel-usuarios" class="panel hidden">
+          <div class="table">
+            <table>
+              <thead><tr><th>Nombre</th><th>Email</th><th>Usuario</th><th>Rol</th><th>Foto</th></tr></thead>
+              <tbody id="tabla-usuarios"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
