@@ -6,6 +6,7 @@ import {
   formatLastSeen,
   truncateText 
 } from '../utils/helpers';
+import UserAvatar from '../../components/UserAvatar';
 import '../styles/UserList.css';
 
 /**
@@ -475,6 +476,9 @@ const UserList = ({
             const avatarColor = getAvatarColor(displayName);
             const isActive = currentRoom?.id === room.id;
             const hasGroupPhoto = room.type === 'group' && room.group_photo;
+            const otherUser = room.type === 'private' 
+              ? room.participants?.find(p => p.userId !== currentUserId)
+              : null;
 
             return (
               <div 
@@ -487,10 +491,7 @@ const UserList = ({
                   onClick={() => handleSelectRoom(room)}
                   className="user-list-item-clickable"
                 >
-                  <div 
-                    className="user-list-item-avatar"
-                    style={{ backgroundColor: hasGroupPhoto ? 'transparent' : avatarColor }}
-                  >
+                  <div className="user-list-item-avatar">
                     {hasGroupPhoto ? (
                       <img 
                         src={`http://localhost:3010${room.group_photo}`}
@@ -503,8 +504,17 @@ const UserList = ({
                           e.target.parentElement.innerHTML = initials;
                         }}
                       />
+                    ) : room.type === 'private' && otherUser ? (
+                      <UserAvatar 
+                        userId={otherUser.userId}
+                        nombre={displayName}
+                        tieneFoto={otherUser.tieneFotoPerfil === 1 || otherUser.tieneFotoPerfil === true}
+                        size="md"
+                      />
                     ) : (
-                      initials
+                      <div style={{ backgroundColor: avatarColor, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
+                        {initials}
+                      </div>
                     )}
                   </div>
                   
@@ -655,11 +665,13 @@ const UserList = ({
                       className="new-chat-modal-contact"
                       onClick={() => handleCreateChat(contact)}
                     >
-                      <div 
-                        className="new-chat-modal-contact-avatar"
-                        style={{ backgroundColor: avatarColor }}
-                      >
-                        {initials}
+                      <div className="new-chat-modal-contact-avatar">
+                        <UserAvatar 
+                          userId={contact.id}
+                          nombre={contact.nombre}
+                          tieneFoto={contact.tiene_foto_perfil === 1 || contact.tiene_foto_perfil === true}
+                          size="md"
+                        />
                       </div>
                       
                       <div className="new-chat-modal-contact-info">
@@ -738,11 +750,13 @@ const UserList = ({
                           {isSelected && '✓'}
                         </div>
 
-                        <div 
-                          className="new-group-contact-avatar"
-                          style={{ backgroundColor: avatarColor }}
-                        >
-                          {initials}
+                        <div className="new-group-contact-avatar">
+                          <UserAvatar 
+                            userId={contact.id}
+                            nombre={contact.nombre}
+                            tieneFoto={contact.tiene_foto_perfil === 1 || contact.tiene_foto_perfil === true}
+                            size="md"
+                          />
                         </div>
                         
                         <div className="new-group-contact-info">
@@ -894,11 +908,12 @@ const UserList = ({
 
                       return (
                         <div key={contactId} className="new-group-selected-item">
-                          <div 
-                            className="new-group-selected-avatar"
-                            style={{ backgroundColor: avatarColor }}
-                          >
-                            {initials}
+                          <div className="new-group-selected-avatar">
+                            <UserAvatar 
+                              userId={contactId}
+                              nombre={contact.nombre}
+                              size="sm"
+                            />
                           </div>
                           <span className="new-group-selected-name">
                             {contact.nombre}

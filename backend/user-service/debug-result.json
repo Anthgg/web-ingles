@@ -1,0 +1,25 @@
+{
+  "type": "AppError",
+  "message": "Error en la base de datos.",
+  "keys": [
+    "name",
+    "statusCode",
+    "details"
+  ],
+  "full": {
+    "name": "AppError",
+    "statusCode": 500,
+    "details": {
+      "code": "DB_ERROR",
+      "driverCode": "ER_BAD_FIELD_ERROR",
+      "context": "db.query",
+      "attempt": 0
+    }
+  },
+  "details": {
+    "code": "DB_ERROR",
+    "driverCode": "ER_BAD_FIELD_ERROR",
+    "context": "db.query",
+    "attempt": 0
+  }
+}

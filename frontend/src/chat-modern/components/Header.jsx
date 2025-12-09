@@ -1,11 +1,12 @@
 import React from 'react';
+import UserAvatar from '../../components/UserAvatar';
 import '../styles/Header.css';
 
 /**
  * Header del chat
  * Muestra nombre, estado, acciones y botón back en móvil
  */
-const Header = ({ room, onBack, isMobile, connected }) => {
+const Header = ({ room, onBack, isMobile, connected, currentUserId }) => {
   // Obtener iniciales
   const getInitials = (name) => {
     if (!name) return '?';
@@ -39,11 +40,27 @@ const Header = ({ room, onBack, isMobile, connected }) => {
 
       {/* Info del contacto/grupo */}
       <div className="modern-header-info">
-        <div 
-          className="modern-header-avatar"
-          style={{ backgroundColor: getAvatarColor(room?.name) }}
-        >
-          {getInitials(room?.name || 'Chat')}
+        <div className="modern-header-avatar">
+          {room?.type === 'private' && room.participants ? (
+            (() => {
+              const otherUser = room.participants.find(p => p.userId !== currentUserId);
+              return otherUser ? (
+                <UserAvatar 
+                  userId={otherUser.userId}
+                  nombre={room?.name || 'Chat'}
+                  size="md"
+                />
+              ) : (
+                <div style={{ backgroundColor: getAvatarColor(room?.name), width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
+                  {getInitials(room?.name || 'Chat')}
+                </div>
+              );
+            })()
+          ) : (
+            <div style={{ backgroundColor: getAvatarColor(room?.name), width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
+              {getInitials(room?.name || 'Chat')}
+            </div>
+          )}
         </div>
         <div className="modern-header-text">
           <h3 className="modern-header-name">{room?.name || 'Chat'}</h3>

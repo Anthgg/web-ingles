@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import UserAvatar from '../../components/UserAvatar';
 import '../styles/Sidebar.css';
 
 /**
@@ -61,11 +62,12 @@ const Sidebar = ({ rooms, currentRoom, onSelectRoom, user, theme, onToggleTheme,
       {/* Header del sidebar */}
       <div className="modern-sidebar-header">
         <div className="modern-sidebar-user">
-          <div 
-            className="modern-sidebar-user-avatar"
-            style={{ backgroundColor: getAvatarColor(user?.nombre) }}
-          >
-            {getInitials(user?.nombre || 'Usuario')}
+          <div className="modern-sidebar-user-avatar">
+            <UserAvatar 
+              userId={user?.id}
+              nombre={user?.nombre || 'Usuario'}
+              size="lg"
+            />
           </div>
           <div className="modern-sidebar-user-info">
             <h3>{user?.nombre || 'Usuario'}</h3>
@@ -126,17 +128,30 @@ const Sidebar = ({ rooms, currentRoom, onSelectRoom, user, theme, onToggleTheme,
             <p>No hay conversaciones</p>
           </div>
         ) : (
-          filteredRooms.map(room => (
+          filteredRooms.map(room => {
+            const isPrivateChat = room.type === 'private';
+            const otherUser = isPrivateChat && room.participants 
+              ? room.participants.find(p => p.userId !== user?.id)
+              : null;
+            
+            return (
             <div
               key={room.id}
               className={`modern-chat-item ${currentRoom?.id === room.id ? 'active' : ''}`}
               onClick={() => onSelectRoom(room)}
             >
-              <div 
-                className="modern-chat-item-avatar"
-                style={{ backgroundColor: getAvatarColor(room.name) }}
-              >
-                {getInitials(room.name)}
+              <div className="modern-chat-item-avatar">
+                {isPrivateChat && otherUser ? (
+                  <UserAvatar 
+                    userId={otherUser.userId}
+                    nombre={room.name}
+                    size="md"
+                  />
+                ) : (
+                  <div style={{ backgroundColor: getAvatarColor(room.name), width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontSize: '18px', fontWeight: '600', color: 'white' }}>
+                    {getInitials(room.name)}
+                  </div>
+                )}
               </div>
               
               <div className="modern-chat-item-content">
@@ -159,7 +174,8 @@ const Sidebar = ({ rooms, currentRoom, onSelectRoom, user, theme, onToggleTheme,
                 </div>
               </div>
             </div>
-          ))
+          );
+          })
         )}
       </div>
     </div>

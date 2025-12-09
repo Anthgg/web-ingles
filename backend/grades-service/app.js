@@ -6,6 +6,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { str, num } = require('envalid');
 const { createConfig } = require('../config');
+const { setupExamenesRoutes } = require('./examenes-routes');
 
 const app = express();
 
@@ -423,6 +424,17 @@ io.on('connection', (socket) => {
 
 app.set('io', io);
 
+// Configurar rutas de exámenes v2 con validación por nivel educativo
+setupExamenesRoutes(app, {
+  pool,
+  assignationPool,
+  classesPool,
+  usersPool,
+  authMiddleware,
+  asyncHandler,
+  io,
+});
+
 const toNumberOrNull = (value) => {
   if (value === null || value === undefined) {
     return null;
@@ -593,7 +605,7 @@ const fetchExamParticipants = async (examen) => {
 
   const placeholders = studentIds.map(() => '?').join(',');
   const [users] = await usersPool.query(
-    `SELECT id, nombre, email
+    `SELECT id, nombre, email, (foto_perfil_imagen IS NOT NULL) AS tiene_foto
        FROM usuarios
       WHERE id IN (${placeholders})`,
     studentIds
@@ -606,8 +618,10 @@ const fetchExamParticipants = async (examen) => {
       const user = usersMap.get(id);
       return {
         estudiante_id: id,
+        usuario_id: id,
         nombre: user?.nombre || 'Estudiante sin nombre',
         email: user?.email || null,
+        tiene_foto: user?.tiene_foto === 1 || user?.tiene_foto === true,
       };
     })
     .sort((a, b) =>

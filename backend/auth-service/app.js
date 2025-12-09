@@ -8,6 +8,7 @@ const qrcode = require('qrcode');
 const crypto = require('crypto');
 const { str, num } = require('envalid');
 const { createConfig } = require('../config');
+const { renderEmailOTP, getSaludo } = require('./templates/email-helper');
 let twilioClient = null;
 let nodemailer = null;
 
@@ -162,10 +163,16 @@ const OTP_TTL_MINUTES = env.OTP_TTL_MINUTES;
 const MAX_ATTEMPTS = env.OTP_MAX_ATTEMPTS;
 
 const ipWindow = new Map();
-const RATE_LIMIT_MAX = config.get('OTP_IP_RATE_MAX', 10);
-const RATE_LIMIT_WINDOW_MS = config.get('OTP_IP_RATE_WINDOW_MS', 15 * 60 * 1000);
+// En desarrollo, aumentar límites para pruebas
+const isDev = env.NODE_ENV === 'development';
+const RATE_LIMIT_MAX = isDev ? 100 : config.get('OTP_IP_RATE_MAX', 10);
+const RATE_LIMIT_WINDOW_MS = isDev ? 5 * 60 * 1000 : config.get('OTP_IP_RATE_WINDOW_MS', 15 * 60 * 1000);
 
 function rateLimitIp(ip) {
+  // En desarrollo, ser más permisivo
+  if (isDev) {
+    console.log(`[Auth Service] Rate limit check for IP: ${ip} (dev mode - más permisivo)`);
+  }
   const nowTs = Date.now();
   const entry = ipWindow.get(ip) || { count: 0, start: nowTs };
   if (nowTs - entry.start > RATE_LIMIT_WINDOW_MS) {
@@ -173,7 +180,12 @@ function rateLimitIp(ip) {
   }
   entry.count += 1;
   ipWindow.set(ip, entry);
-  return entry.count <= RATE_LIMIT_MAX;
+  const allowed = entry.count <= RATE_LIMIT_MAX;
+  if (!allowed) {
+    const waitTime = Math.ceil((RATE_LIMIT_WINDOW_MS - (nowTs - entry.start)) / 1000);
+    console.log(`[Auth Service] ⚠️ Rate limit excedido para IP ${ip}. Intentos: ${entry.count}/${RATE_LIMIT_MAX}. Esperar: ${waitTime}s`);
+  }
+  return allowed;
 }
 
 function getUserByEmail(email) {
@@ -211,15 +223,53 @@ async function ensureProviders() {
 
 async function sendSms(to, body) {
   await ensureProviders();
-  if (!twilioClient) throw new Error('Servicio SMS no configurado');
+  
+  // Modo desarrollo: si no hay cliente Twilio, mostrar en consola
+  if (!twilioClient) {
+    if (env.NODE_ENV === 'development') {
+      console.log('[Auth Service] ⚠️ Twilio no configurado - Modo desarrollo');
+      console.log(`[Auth Service] 📱 SMS SIMULADO para ${to}:`);
+      console.log(`[Auth Service] 📱 Contenido: ${body}`);
+      return { sid: 'dev-mode-sms-' + Date.now(), simulated: true };
+    }
+    throw new Error('Servicio SMS no configurado');
+  }
+  
   if (!env.TWILIO_FROM) throw new Error('Número de origen SMS no configurado');
   if (!to) throw new Error('Número de destino no proporcionado');
-  return await twilioClient.messages.create({ from: env.TWILIO_FROM, to, body });
+  
+  try {
+    const result = await twilioClient.messages.create({ from: env.TWILIO_FROM, to, body });
+    console.log('[Auth Service] ✅ SMS enviado a:', to);
+    return result;
+  } catch (err) {
+    console.error('[Auth Service] ❌ Error enviando SMS:', err.message);
+    // En desarrollo, mostrar el código en consola en lugar de fallar
+    if (env.NODE_ENV === 'development') {
+      console.log('[Auth Service] ⚠️ Twilio falló - Mostrando SMS en consola:');
+      console.log(`[Auth Service] 📱 Para: ${to}`);
+      console.log(`[Auth Service] 📱 Contenido: ${body}`);
+      return { sid: 'dev-fallback-sms-' + Date.now(), simulated: true };
+    }
+    throw new Error(`Error enviando SMS: ${err.message}`);
+  }
 }
 
-async function sendEmail(to, subject, text) {
+async function sendEmail(to, subject, text, options = {}) {
   await ensureProviders();
   if (!nodemailer) throw new Error('Email no disponible');
+  
+  // Modo desarrollo: si no hay credenciales SMTP, mostrar en consola
+  if (!env.SMTP_USER || !env.SMTP_PASS) {
+    console.log('[Auth Service] ⚠️ SMTP no configurado - Modo desarrollo');
+    console.log(`[Auth Service] 📧 EMAIL SIMULADO para ${to}:`);
+    console.log(`[Auth Service] 📧 Asunto: ${subject}`);
+    console.log(`[Auth Service] 📧 Contenido: ${text}`);
+    if (options.codigo) {
+      console.log(`[Auth Service] 🔐 CÓDIGO OTP: ${options.codigo}`);
+    }
+    return { messageId: 'dev-mode-' + Date.now(), simulated: true };
+  }
   
   // Convertir puerto a número y secure a boolean
   const port = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 587;
@@ -229,25 +279,45 @@ async function sendEmail(to, subject, text) {
     host: env.SMTP_HOST || 'smtp.gmail.com',
     port: port,
     secure: secure,
-    auth: env.SMTP_USER ? { 
+    auth: { 
       user: env.SMTP_USER, 
       pass: env.SMTP_PASS?.replace(/\s+/g, '') // Remover espacios de la contraseña
-    } : undefined,
+    },
   });
   
+  // Preparar opciones del correo
+  const mailOptions = { 
+    from: env.FROM_EMAIL || env.SMTP_USER, 
+    to, 
+    subject, 
+    text // Siempre incluir versión texto como fallback
+  };
+  
+  // Si se proporciona HTML, usarlo
+  if (options.html) {
+    mailOptions.html = options.html;
+  }
+  
   try {
-    return await transporter.sendMail({ 
-      from: env.FROM_EMAIL || env.SMTP_USER, 
-      to, 
-      subject, 
-      text 
-    });
+    const result = await transporter.sendMail(mailOptions);
+    console.log('[Auth Service] ✅ Email enviado a:', to);
+    return result;
   } catch (err) {
-    console.error('[Auth Service] Error enviando email:', err.message);
+    console.error('[Auth Service] ❌ Error enviando email:', err.message);
+    // En desarrollo, mostrar el código en consola en lugar de fallar
+    if (env.NODE_ENV === 'development') {
+      console.log('[Auth Service] ⚠️ SMTP falló - Mostrando email en consola:');
+      console.log(`[Auth Service] 📧 Para: ${to}`);
+      console.log(`[Auth Service] 📧 Asunto: ${subject}`);
+      console.log(`[Auth Service] 📧 Contenido: ${text}`);
+      if (options.codigo) {
+        console.log(`[Auth Service] 🔐 CÓDIGO OTP: ${options.codigo}`);
+      }
+      return { messageId: 'dev-fallback-' + Date.now(), simulated: true };
+    }
     throw new Error(`Error enviando email: ${err.message}`);
   }
 }
-
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
   const trimmedEmail = typeof email === 'string' ? email.trim() : '';
@@ -488,7 +558,23 @@ app.post('/auth/otp/send', async (req, res) => {
         // El teléfono ya fue validado antes, podemos usarlo directamente
         await sendSms(user.telefono, `Tu código OTP es: ${code}. Expira en ${OTP_TTL_MINUTES} min.`);
       } else {
-        await sendEmail(user.email, 'Tu código OTP', `Tu código OTP es: ${code}. Expira en ${OTP_TTL_MINUTES} min.`);
+        // Generar email con plantilla HTML elegante
+        const htmlEmail = renderEmailOTP({
+          nombre: user.nombre || 'Usuario',
+          codigo: code,
+          mensaje: 'Has solicitado un código de verificación para tu campus virtual en I.E Peruano Japonés 7213. Ingresa el siguiente código para continuar con la autenticación:',
+          expiracion: OTP_TTL_MINUTES,
+          config: {
+            soporte_email: env.FROM_EMAIL || 'soporte@perujapones7213.edu.pe'
+          }
+        });
+        
+        await sendEmail(
+          user.email, 
+          `${getSaludo()}, ${user.nombre || 'Usuario'} - Tu código de verificación`, 
+          `Tu código OTP es: ${code}. Expira en ${OTP_TTL_MINUTES} min.`,
+          { html: htmlEmail, codigo: code }
+        );
       }
     } catch (deliverErr) {
       console.error('OTP delivery error:', deliverErr.message);

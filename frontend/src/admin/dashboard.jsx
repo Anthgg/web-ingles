@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState, lazy, Suspense } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { 
+import {
   FaUser, FaChalkboardTeacher, FaClipboardCheck,
   FaSignOutAlt, FaCalendarAlt, FaUserGraduate,
   FaTachometerAlt, FaRegBell,
@@ -8,8 +8,9 @@ import {
   FaUsers, FaBookOpen, FaAward, FaChevronDown,
   FaMoon, FaSun, FaTimes, FaExpand, FaCompress,
   FaCheck, FaChevronLeft, FaBars, FaAdjust,
-  FaFileAlt, FaExclamationTriangle
+  FaFileAlt, FaExclamationTriangle, FaClock
 } from 'react-icons/fa';
+import UserAvatar from '../components/UserAvatar';
 import ProfesoresAsignaturas from '../components/ProfesoresAsignaturas';
 import AsignacionEstudiantes from '../components/AsignacionEstudiantes';
 import RegistroUsuario from '../components/RegistroUsuario';
@@ -17,6 +18,7 @@ import DatosPersonalesUsuario from '../components/DatosPersonalesUsuario';
 import SugerenciasPanel from '../components/SugerenciasPanel';
 import ReportesChart from '../components/ReportesChart';
 import ReportesPanel from '../components/ReportesPanel';
+import CursosMaestrosEstudiantes from '../components/CursosMaestrosEstudiantes';
 import { Chat } from '../chat';
 
 // Lazy loaded components
@@ -29,6 +31,7 @@ const Configuracion = lazy(() => import('../components/Configuracion'));
 const UsuariosIncompletos = lazy(() => import('../components/UsuariosIncompletos'));
 const ControlDatosUsuario = lazy(() => import('../components/ControlDatosUsuario'));
 const PermisosPanel = lazy(() => import('../components/PermisosPanel'));
+const ClasesPasadasPanel = lazy(() => import('../components/ClasesPasadasPanel'));
 
 const Dashboard = ({
   userInfo,
@@ -68,6 +71,7 @@ const Dashboard = ({
   const [ciclos, setCiclos] = useState([]);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 1024);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [usuarioPendienteDatos, setUsuarioPendienteDatos] = useState(null);
   const { isDark: darkMode, toggleTheme, highContrast, toggleHighContrast, customColors, updateCustomColors } = useTheme();
 
   // Fetch functions and datasets are received via props from App.jsx
@@ -101,6 +105,8 @@ const Dashboard = ({
         { id: 'asignacion', label: 'Asignar Profesores', icon: FaCalendarAlt, module: 'asignacion' },
         { id: 'profesores-asignaturas', label: 'Prof. & Asignaturas', icon: FaChalkboardTeacher, module: 'profesores-asignaturas' },
         { id: 'asignacion-estudiantes', label: 'Asignar Estudiantes', icon: FaUserGraduate, module: 'asignacion-estudiantes' },
+        { id: 'cursos-maestros-estudiantes', label: 'Curso Completo', icon: FaBookOpen, module: 'cursos-maestros-estudiantes' },
+        { id: 'clases-pasadas', label: 'Clases Pasadas', icon: FaClock, module: 'clases-pasadas' },
       ]
     },
     {
@@ -117,14 +123,18 @@ const Dashboard = ({
   ];
 
   // Handlers
-  const handleModuleChange = useCallback((module) => {
+  const handleModuleChange = useCallback((module, options = {}) => {
     try {
+      const nextUsuarioPendiente = Object.prototype.hasOwnProperty.call(options, 'usuarioDatos')
+        ? options.usuarioDatos
+        : null;
+      setUsuarioPendienteDatos(nextUsuarioPendiente);
       setActiveModule(module);
     } catch (err) {
       console.error('Error al cambiar módulo:', err);
       showError && showError('Error al cambiar de módulo');
     }
-  }, [setActiveModule, showError]);
+  }, [setActiveModule, showError, setUsuarioPendienteDatos]);
 
   const handleRegistroSuccess = async (msg) => {
     showSuccess(msg);
@@ -134,7 +144,7 @@ const Dashboard = ({
       if (Array.isArray(lista) && lista.length > 0) {
         setUsuarioCreadoId(lista[lista.length - 1].id);
       }
-    } catch {}
+    } catch { }
   };
 
   useEffect(() => {
@@ -175,6 +185,7 @@ const Dashboard = ({
       'asignacion': 'Asignación de Profesores',
       'profesores-asignaturas': 'Profesores y Asignaturas',
       'asignacion-estudiantes': 'Asignación de Estudiantes',
+      'clases-pasadas': 'Histórico de Clases',
       'reportes': 'Reportes del Sistema',
       'control-datos-usuario': 'Control de Datos de Usuario',
       'usuarios-incompletos': 'Control de Datos de Usuarios',
@@ -223,7 +234,7 @@ const Dashboard = ({
 
   return (
     <>
-  <style>{`
+      <style>{`
         /* ========== ANIMACIONES MODERNAS ========== */
         @keyframes slideInRight {
           from {
@@ -1007,7 +1018,7 @@ const Dashboard = ({
 
         {/* Mobile Overlay */}
         {isMobile && mobileSidebarOpen && (
-          <div 
+          <div
             className="mobile-overlay"
             onClick={() => setMobileSidebarOpen(false)}
             style={{
@@ -1035,7 +1046,7 @@ const Dashboard = ({
             <div className="d-flex align-items-center justify-content-center" style={{ minHeight: '80px' }}>
               {sidebarCollapsed ? (
                 // Logo pequeño cuando está colapsado
-                <div 
+                <div
                   style={{
                     width: '48px',
                     height: '48px',
@@ -1046,12 +1057,12 @@ const Dashboard = ({
                   }}
                   title="I.E Peruano Japonés 7213"
                 >
-                  <img 
-                    src="./logo.png" 
-                    alt="Logo" 
-                    style={{ 
-                      width: "48px", 
-                      height: "48px", 
+                  <img
+                    src="./logo.png"
+                    alt="Logo"
+                    style={{
+                      width: "48px",
+                      height: "48px",
                       objectFit: "contain",
                       transition: 'all 0.3s ease'
                     }}
@@ -1060,13 +1071,13 @@ const Dashboard = ({
               ) : (
                 // Logo y texto completo cuando está expandido
                 <div className="nav-text text-center" style={{ width: '100%' }}>
-                  <img 
-                    src="./logo.png" 
-                    alt="Logo" 
-                    style={{ 
-                      width: "60px", 
-                      height: "60px", 
-                      objectFit: "contain", 
+                  <img
+                    src="./logo.png"
+                    alt="Logo"
+                    style={{
+                      width: "60px",
+                      height: "60px",
+                      objectFit: "contain",
                       marginBottom: "5px",
                       transition: 'all 0.3s ease'
                     }}
@@ -1080,10 +1091,10 @@ const Dashboard = ({
 
           {/* Botón de colapsar/expandir */}
           <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-            <button 
+            <button
               className="btn btn-link p-0 w-100"
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              style={{ 
+              style={{
                 color: 'white',
                 background: 'rgba(255, 255, 255, 0.1)',
                 height: '36px',
@@ -1107,7 +1118,7 @@ const Dashboard = ({
               aria-label={sidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
               aria-expanded={!sidebarCollapsed}
             >
-              <div style={{ 
+              <div style={{
                 transition: 'transform 0.3s ease',
                 transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)',
                 display: 'flex',
@@ -1121,40 +1132,38 @@ const Dashboard = ({
 
           {/* User Info */}
           <div className="p-4 border-bottom" style={{ borderColor: 'rgba(255, 255, 255, 0.1)' }}>
-            <div 
+            <div
               className="d-flex align-items-center cursor-pointer position-relative"
               onClick={() => !sidebarCollapsed && setShowUserMenu(!showUserMenu)}
-              style={{ 
+              style={{
                 justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                 transition: 'all 0.3s ease'
               }}
             >
-              <div 
-                className="d-flex align-items-center justify-content-center"
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  background: 'var(--accent-secondary)',
-                  borderRadius: '50%',
-                  color: 'white',
-                  marginRight: sidebarCollapsed ? '0' : '12px',
-                  flexShrink: 0,
-                  transition: 'all 0.3s ease'
-                }}
-              >
-                <FaUser size={16} />
+              <div style={{ marginRight: sidebarCollapsed ? '0' : '12px', flexShrink: 0 }}>
+                <UserAvatar
+                  userId={userInfo?.id}
+                  nombre={userInfo?.nombre || 'Administrador'}
+                  tieneFoto={userInfo?.tiene_foto_perfil}
+                  size="md"
+                />
               </div>
               {!sidebarCollapsed && (
                 <>
                   <div className="flex-grow-1 user-details">
-                    <div className="fw-medium" style={{ color: 'white' }}>{userInfo?.nombre || 'Administrador'}</div>
+                    <div className="fw-medium" style={{ color: 'white' }}>
+                      {userInfo?.nombres && userInfo?.apellido_paterno
+                        ? `${userInfo.nombres} ${userInfo.apellido_paterno}${userInfo.apellido_materno ? ' ' + userInfo.apellido_materno : ''}`
+                        : userInfo?.nombre || 'Administrador'
+                      }
+                    </div>
                     <small className="text-muted">{userInfo?.rol || 'Admin'}</small>
                   </div>
                   <FaChevronDown size={12} style={{ color: 'rgba(255, 255, 255, 0.6)' }} />
                 </>
               )}
             </div>
-              
+
             {showUserMenu && !sidebarCollapsed && (
               <div className="user-menu">
                 <div className="p-3">
@@ -1180,10 +1189,9 @@ const Dashboard = ({
                   {category.items.map((item) => (
                     <li key={item.id} className="nav-item">
                       <button
-                        className={`nav-link-minimal ${
-                          (activeModule === item.module || (!activeModule && item.module === null)) 
-                            ? 'active' : ''
-                        }`}
+                        className={`nav-link-minimal ${(activeModule === item.module || (!activeModule && item.module === null))
+                          ? 'active' : ''
+                          }`}
                         onClick={() => handleModuleChange(item.module)}
                         disabled={loading}
                       >
@@ -1215,9 +1223,9 @@ const Dashboard = ({
         </nav>
 
         {/* Main Content */}
-        <main 
+        <main
           className="flex-grow-1 main-content-wrapper"
-          style={{ 
+          style={{
             marginLeft: (sidebarCollapsed && !isMobile) ? '80px' : '280px',
             transition: 'margin-left 0.3s ease',
             position: 'relative',
@@ -1232,24 +1240,24 @@ const Dashboard = ({
           <div className="minimal-header theme-transition">
             <div className="d-flex align-items-center justify-content-between">
               <div className="d-flex align-items-center">
-                <img src="/logo.png" alt="Logo I.E Peruano Japonés 7213" className="me-3" style={{height: '45px', width: 'auto'}} />
+                <img src="/logo.png" alt="Logo I.E Peruano Japonés 7213" className="me-3" style={{ height: '45px', width: 'auto' }} />
                 <div>
                   <h1 className="h4 mb-1 fw-bold">{getModuleTitle(activeModule)}</h1>
                   <p className="mb-0 text-muted small">
-                    {new Date().toLocaleDateString('es-ES', { 
-                      weekday: 'long', 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric' 
+                    {new Date().toLocaleDateString('es-ES', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
                     })}
                   </p>
                 </div>
               </div>
-              
+
               <div className="d-flex align-items-center gap-3">
                 {/* Sidebar toggle for desktop */}
                 {!isMobile && (
-                  <div 
+                  <div
                     className="action-btn"
                     onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                     title={sidebarCollapsed ? 'Expandir menú' : 'Colapsar menú'}
@@ -1261,10 +1269,10 @@ const Dashboard = ({
                     <FaChevronLeft size={16} style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }} />
                   </div>
                 )}
-                
+
                 {/* Hamburger menu for mobile */}
                 {isMobile && (
-                  <div 
+                  <div
                     className="action-btn"
                     onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
                     title="Menú"
@@ -1275,7 +1283,7 @@ const Dashboard = ({
                     <FaBars size={16} />
                   </div>
                 )}
-                
+
                 {/* Search */}
                 <div className="position-relative">
                   <input
@@ -1286,28 +1294,28 @@ const Dashboard = ({
                     onChange={(e) => setSearchTerm(e.target.value)}
                     aria-label="Buscar en el dashboard"
                   />
-                  <FaSearch 
-                    className="position-absolute" 
-                    style={{ 
-                      left: '12px', 
-                      top: '50%', 
+                  <FaSearch
+                    className="position-absolute"
+                    style={{
+                      left: '12px',
+                      top: '50%',
                       transform: 'translateY(-50%)',
                       color: 'var(--text-muted)'
-                    }} 
-                    size={14} 
+                    }}
+                    size={14}
                   />
                 </div>
-                
+
                 {/* Actions */}
                 <div className="action-btn">
                   <FaRegBell size={16} />
                 </div>
-                
+
                 <div className="action-btn">
                   <FaFilter size={16} />
                 </div>
-                
-                <div 
+
+                <div
                   className="action-btn"
                   onClick={toggleTheme}
                   title={darkMode ? 'Modo claro' : 'Modo oscuro'}
@@ -1317,8 +1325,8 @@ const Dashboard = ({
                 >
                   {darkMode ? <FaSun size={16} /> : <FaMoon size={16} />}
                 </div>
-                
-                <div 
+
+                <div
                   className="action-btn"
                   onClick={toggleHighContrast}
                   title={highContrast ? 'Desactivar alto contraste' : 'Activar alto contraste'}
@@ -1340,7 +1348,7 @@ const Dashboard = ({
                 <div className="alert alert-danger border-0 shadow mb-0">
                   <div className="d-flex align-items-center">
                     <div className="me-3">
-                      <div 
+                      <div
                         className="d-flex align-items-center justify-content-center"
                         style={{
                           width: '32px',
@@ -1357,22 +1365,22 @@ const Dashboard = ({
                       <strong>Error</strong>
                       <div>{error}</div>
                     </div>
-                    <button 
-                      type="button" 
-                      className="btn-close" 
+                    <button
+                      type="button"
+                      className="btn-close"
                       onClick={() => setError('')}
                     ></button>
                   </div>
                 </div>
               </div>
             )}
-            
+
             {success && (
               <div className="notification">
                 <div className="alert alert-success border-0 shadow mb-0">
                   <div className="d-flex align-items-center">
                     <div className="me-3">
-                      <div 
+                      <div
                         className="d-flex align-items-center justify-content-center"
                         style={{
                           width: '32px',
@@ -1389,9 +1397,9 @@ const Dashboard = ({
                       <strong>Éxito</strong>
                       <div>{success}</div>
                     </div>
-                    <button 
-                      type="button" 
-                      className="btn-close" 
+                    <button
+                      type="button"
+                      className="btn-close"
                       onClick={() => setSuccess('')}
                     ></button>
                   </div>
@@ -1414,7 +1422,7 @@ const Dashboard = ({
                           <h3 className="h2 mb-0 fw-bold">{statsData.usuarios}</h3>
                           <p className="mb-0 text-muted">Total Usuarios</p>
                         </div>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center"
                           style={{
                             width: '48px',
@@ -1432,7 +1440,7 @@ const Dashboard = ({
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="col-lg-3 col-md-6">
                     <div className="stat-card">
                       <div className="d-flex align-items-center justify-content-between mb-3">
@@ -1440,7 +1448,7 @@ const Dashboard = ({
                           <h3 className="h2 mb-0 fw-bold">{statsData.clases}</h3>
                           <p className="mb-0 text-muted">Cursos Activos</p>
                         </div>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center"
                           style={{
                             width: '48px',
@@ -1458,7 +1466,7 @@ const Dashboard = ({
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="col-lg-3 col-md-6">
                     <div className="stat-card">
                       <div className="d-flex align-items-center justify-content-between mb-3">
@@ -1466,7 +1474,7 @@ const Dashboard = ({
                           <h3 className="h2 mb-0 fw-bold">{statsData.profesores}</h3>
                           <p className="mb-0 text-muted">Profesores</p>
                         </div>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center"
                           style={{
                             width: '48px',
@@ -1484,7 +1492,7 @@ const Dashboard = ({
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="col-lg-3 col-md-6">
                     <div className="stat-card">
                       <div className="d-flex align-items-center justify-content-between mb-3">
@@ -1492,7 +1500,7 @@ const Dashboard = ({
                           <h3 className="h2 mb-0 fw-bold">{statsData.estudiantes}</h3>
                           <p className="mb-0 text-muted">Estudiantes</p>
                         </div>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center"
                           style={{
                             width: '48px',
@@ -1518,7 +1526,7 @@ const Dashboard = ({
                   <div className="row g-3">
                     <div className="col-md-4">
                       <div className="quick-action" onClick={() => handleModuleChange('usuarios')}>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center mx-auto mb-3"
                           style={{
                             width: '64px',
@@ -1536,7 +1544,7 @@ const Dashboard = ({
                     </div>
                     <div className="col-md-4">
                       <div className="quick-action" onClick={() => handleModuleChange('clases')}>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center mx-auto mb-3"
                           style={{
                             width: '64px',
@@ -1554,7 +1562,7 @@ const Dashboard = ({
                     </div>
                     <div className="col-md-4">
                       <div className="quick-action" onClick={() => handleModuleChange('asignacion-estudiantes')}>
-                        <div 
+                        <div
                           className="d-flex align-items-center justify-content-center mx-auto mb-3"
                           style={{
                             width: '64px',
@@ -1580,167 +1588,191 @@ const Dashboard = ({
               <div className="fade-in">
                 {/* Panel de Sugerencias para módulos activos */}
                 <SugerenciasPanel activeModule={activeModule} />
-                
+
                 <div className="minimal-card">
-                <Suspense fallback={
-                  <div className="text-center py-5">
-                    <div className="spinner-border text-primary" role="status">
-                      <span className="visually-hidden">Cargando...</span>
+                  <Suspense fallback={
+                    <div className="text-center py-5">
+                      <div className="spinner-border text-primary" role="status">
+                        <span className="visually-hidden">Cargando...</span>
+                      </div>
+                      <p className="mt-3">Cargando módulo...</p>
                     </div>
-                    <p className="mt-3">Cargando módulo...</p>
-                  </div>
-                }>
-                {activeModule === 'usuarios' && (
-                  <React.Fragment>
-                    {showRegistro && !usuarioCreadoId && (
-                      <RegistroUsuario
-                        tipo={tipoRegistro}
-                        onSuccess={handleRegistroSuccess}
-                        onError={showError}
+                  }>
+                    {activeModule === 'usuarios' && (
+                      <React.Fragment>
+                        {showRegistro && !usuarioCreadoId && (
+                          <RegistroUsuario
+                            tipo={tipoRegistro}
+                            onSuccess={handleRegistroSuccess}
+                            onError={showError}
+                          />
+                        )}
+                        {usuarioCreadoId && (
+                          <DatosPersonalesUsuario
+                            usuarioId={usuarioCreadoId}
+                            onSuccess={showSuccess}
+                            onError={showError}
+                          />
+                        )}
+                        <UsuariosList
+                          usuarios={usuarios}
+                          token={token}
+                          fetchUsuarios={fetchUsuarios}
+                          showError={showError}
+                          showSuccess={showSuccess}
+                          onNavigateUsuariosIncompletos={(target = 'usuarios-incompletos', usuario = null) =>
+                            handleModuleChange(target, { usuarioDatos: usuario })}
+                        />
+                      </React.Fragment>
+                    )}
+
+                    {activeModule === 'clases' && (
+                      <ClasesList
+                        clases={clases}
+                        token={token}
+                        fetchClases={fetchClases}
+                        showError={showError}
+                        showSuccess={showSuccess}
                       />
                     )}
-                    {usuarioCreadoId && (
-                      <DatosPersonalesUsuario
-                        usuarioId={usuarioCreadoId}
-                        onSuccess={showSuccess}
-                        onError={showError}
-                      />
-                    )}
-                    <UsuariosList
-                      usuarios={usuarios}
-                      token={token}
-                      fetchUsuarios={fetchUsuarios}
-                      showError={showError}
-                      showSuccess={showSuccess}
-                    />
-                  </React.Fragment>
-                )}
-                
-                {activeModule === 'clases' && (
-                  <ClasesList 
-                    clases={clases} 
-                    token={token} 
-                    fetchClases={fetchClases} 
-                    showError={showError} 
-                    showSuccess={showSuccess} 
-                  />
-                )}
-                
-                {activeModule === 'asistencias' && (
-                  <AsistenciasList
-                    asistencias={asistencias}
-                    usuarios={usuarios}
-                    clases={clases}
-                    token={token}
-                    fetchAsistencias={fetchAsistencias}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
-                
-                {activeModule === 'calificaciones' && (
-                  <CalificacionesList
-                    calificaciones={calificaciones}
-                    usuarios={usuarios}
-                    clases={clases}
-                    token={token}
-                    fetchCalificaciones={fetchCalificaciones}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                    onPromote={handlePromote}
-                  />
-                )}
-                
-                {activeModule === 'configuracion' && (
-                  <Configuracion 
-                    userInfo={userInfo}
-                    darkMode={darkMode}
-                    toggleTheme={toggleTheme}
-                    token={token}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
-                
-                {activeModule === 'permisos' && (
-                  <PermisosPanel 
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
-                
-                {activeModule === 'asignacion' && (
-                  <AsignacionProfesores
-                    profesores={profesores}
-                    cursos={cursos}
-                    asignaciones={asignaciones}
-                    fetchAsignaciones={fetchAsignaciones}
-                    token={token}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
-                
-                {activeModule === 'profesores-asignaturas' && (
-                  <ProfesoresAsignaturas
-                    token={token}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
-                
-                {activeModule === 'asignacion-estudiantes' && (
-                  <AsignacionEstudiantes
-                    usuarios={usuarios}
-                    profesores={profesores}
-                    token={token}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                    ciclos={ciclos}
-                  />
-                )}
-                
-                {activeModule === 'reportes' && (
-                  <div>
-                    <ReportesPanel />
-                    <div style={{ marginTop: '30px' }}>
-                      <ReportesChart
+
+                    {activeModule === 'asistencias' && (
+                      <AsistenciasList
+                        asistencias={asistencias}
                         usuarios={usuarios}
                         clases={clases}
-                        asistencias={asistencias}
-                        calificaciones={calificaciones}
+                        token={token}
+                        fetchAsistencias={fetchAsistencias}
+                        showError={showError}
+                        showSuccess={showSuccess}
                       />
-                    </div>
-                  </div>
-                )}
+                    )}
 
-                {activeModule === 'control-datos-usuario' && (
-                  <ControlDatosUsuario
-                    token={token}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
+                    {activeModule === 'calificaciones' && (
+                      <CalificacionesList
+                        calificaciones={calificaciones}
+                        usuarios={usuarios}
+                        clases={clases}
+                        token={token}
+                        fetchCalificaciones={fetchCalificaciones}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                        onPromote={handlePromote}
+                      />
+                    )}
 
-                {activeModule === 'usuarios-incompletos' && (
-                  <UsuariosIncompletos
-                    token={token}
-                    showError={showError}
-                    showSuccess={showSuccess}
-                  />
-                )}
-                
-                {activeModule === 'chat' && (
-                  <div style={{ 
-                    height: 'calc(100vh - 200px)', 
-                    minHeight: '500px',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}>
-                    <Chat user={userInfo} token={token} />
-                  </div>
-                )}
-                </Suspense>
+                    {activeModule === 'configuracion' && (
+                      <Configuracion
+                        userInfo={userInfo}
+                        darkMode={darkMode}
+                        toggleTheme={toggleTheme}
+                        token={token}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                      />
+                    )}
+
+                    {activeModule === 'permisos' && (
+                      <PermisosPanel
+                        showError={showError}
+                        showSuccess={showSuccess}
+                      />
+                    )}
+
+                    {activeModule === 'asignacion' && (
+                      <AsignacionProfesores
+                        profesores={profesores}
+                        cursos={cursos}
+                        asignaciones={asignaciones}
+                        fetchAsignaciones={fetchAsignaciones}
+                        token={token}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                      />
+                    )}
+
+                    {activeModule === 'profesores-asignaturas' && (
+                      <ProfesoresAsignaturas
+                        token={token}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                      />
+                    )}
+
+                    {activeModule === 'asignacion-estudiantes' && (
+                      <AsignacionEstudiantes
+                        usuarios={usuarios}
+                        profesores={profesores}
+                        token={token}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                        ciclos={ciclos}
+                      />
+                    )}
+
+                    {activeModule === 'cursos-maestros-estudiantes' && (
+                      <CursosMaestrosEstudiantes
+                        token={token}
+                        showError={showError}
+                      />
+                    )}
+
+                    {activeModule === 'clases-pasadas' && (
+                      <ClasesPasadasPanel
+                        asignaciones={asignaciones}
+                        onRefresh={fetchAsignaciones}
+                      />
+                    )}
+
+                    {activeModule === 'reportes' && (
+                      <div>
+                        <ReportesPanel />
+                        <div style={{ marginTop: '30px' }}>
+                          <ReportesChart
+                            usuarios={usuarios}
+                            clases={clases}
+                            asistencias={asistencias}
+                            calificaciones={calificaciones}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {activeModule === 'control-datos-usuario' && (
+                      <ControlDatosUsuario
+                        token={token}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                        usuarioPreseleccionado={usuarioPendienteDatos}
+                        onClearUsuarioPreseleccionado={() => setUsuarioPendienteDatos(null)}
+                        onNavigateUsuariosIncompletos={(target = 'usuarios-incompletos', usuario = null) =>
+                          handleModuleChange(target, { usuarioDatos: usuario })}
+                      />
+                    )}
+
+                    {activeModule === 'usuarios-incompletos' && (
+                      <UsuariosIncompletos
+                        token={token}
+                        showError={showError}
+                        showSuccess={showSuccess}
+                        usuarioPreseleccionado={usuarioPendienteDatos}
+                        onClearUsuarioPreseleccionado={() => setUsuarioPendienteDatos(null)}
+                        onNavigateUsuariosIncompletos={(target = 'usuarios-incompletos', usuario = null) =>
+                          handleModuleChange(target, { usuarioDatos: usuario })}
+                      />
+                    )}
+
+                    {activeModule === 'chat' && (
+                      <div style={{
+                        height: 'calc(100vh - 200px)',
+                        minHeight: '500px',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}>
+                        <Chat user={userInfo} token={token} />
+                      </div>
+                    )}
+                  </Suspense>
                 </div>
               </div>
             )}

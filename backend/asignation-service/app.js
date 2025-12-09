@@ -123,6 +123,30 @@ const stripDiacritics = (value) =>
 const normalizeLevelKey = (value) =>
   typeof value === 'string' ? stripDiacritics(value).toLowerCase() : value;
 
+const normalizeTextValue = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  return value;
+};
+
+const extractGradeNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Number(value);
+  }
+  if (typeof value === 'string') {
+    const match = value.match(/\d+/);
+    if (match && match[0]) {
+      const numeric = Number(match[0]);
+      return Number.isNaN(numeric) ? null : numeric;
+    }
+  }
+  return null;
+};
+
 const buildClassroomLevelMetadata = (allowedLevels) => {
   const allowedSet = new Set(allowedLevels);
   const normalizedAllowedMap = new Map(
@@ -480,6 +504,46 @@ const studentIsEnrolled = async (asignacionId, estudianteId) => {
   return Boolean(row);
 };
 
+// Verifica si el estudiante ya esta inscrito con el mismo profesor en el mismo curso (aunque sea otra asignacion/grupo)
+const studentEnrolledInSameCourseAndProfessor = async ({ estudianteId, cursoId, profesorId, excludeAsignacionId = null }) => {
+  if (!estudianteId || !cursoId || !profesorId) {
+    return false;
+  }
+
+  let query = `
+    SELECT 1
+      FROM asignacion_estudiantes ae
+      JOIN asignaciones_profesor_curso apc ON apc.id = ae.asignacion_id
+     WHERE ae.estudiante_id = ?
+       AND apc.curso_id = ?
+       AND apc.profesor_id = ?`;
+
+  const params = [estudianteId, cursoId, profesorId];
+
+  if (excludeAsignacionId != null) {
+    query += ' AND apc.id <> ?';
+    params.push(excludeAsignacionId);
+  }
+
+  query += ' LIMIT 1';
+
+  const [[row]] = await pool.execute(query, params);
+  return Boolean(row);
+};
+
+const fetchStudentAcademicData = async (estudianteId) => {
+  try {
+    const [rows] = await usersPool.query(
+      'SELECT * FROM estudiante_datos WHERE usuario_id = ? LIMIT 1',
+      [estudianteId]
+    );
+    return rows[0] || null;
+  } catch (error) {
+    console.warn('No fue posible obtener datos académicos del estudiante:', error.message);
+    return null;
+  }
+};
+
 const broadcastAssignmentChange = (action, assignment = {}, extra = {}) => {
   const payload = { action, assignment, ...extra };
   io.emit('assignments:changed', payload);
@@ -817,6 +881,17 @@ app.post(
       return res.status(409).json({ error: 'Ya estas inscrito en este curso' });
     }
 
+    const enrolledWithProfessorCourse = await studentEnrolledInSameCourseAndProfessor({
+      estudianteId,
+      cursoId: assignment.curso_id,
+      profesorId: assignment.profesor_id,
+      excludeAsignacionId: assignment.id,
+    });
+
+    if (enrolledWithProfessorCourse) {
+      return res.status(409).json({ error: 'Ya estas inscrito en este curso con este profesor' });
+    }
+
     const total = await countEnrollments(id);
     if (assignment.max_alumnos != null && total >= assignment.max_alumnos) {
       return res.status(409).json({ error: 'No hay cupos disponibles' });
@@ -1128,8 +1203,27 @@ app.get(
     }
 
     const [rows] = await pool.execute(
-      `SELECT ae.id, ae.estudiante_id, ae.fecha_inscripcion
+      `SELECT 
+          ae.id,
+          ae.estudiante_id,
+          ae.estudiante_id AS usuario_id,
+          ae.fecha_inscripcion,
+          u.nombre AS nombre,
+          u.email AS email,
+          u.apellido_paterno AS apellido_paterno,
+          u.apellido_materno AS apellido_materno,
+          CONCAT(
+            COALESCE(u.apellido_paterno, ''),
+            CASE 
+              WHEN u.apellido_paterno IS NOT NULL AND u.apellido_materno IS NOT NULL THEN ' '
+              ELSE ''
+            END,
+            COALESCE(u.apellido_materno, '')
+          ) AS apellidos,
+          u.rol AS rol,
+          u.activo AS activo
          FROM asignacion_estudiantes ae
+         LEFT JOIN ${env.AUTH_DB_NAME}.usuarios u ON u.id = ae.estudiante_id
         WHERE ae.asignacion_id = ?
         ORDER BY ae.id DESC`,
       [id]
@@ -1161,6 +1255,42 @@ app.post(
       Number(assignment.profesor_id) !== Number(req.user.id)
     ) {
       return res.status(403).json({ error: 'Permisos insuficientes' });
+    }
+
+    // Validar que el estudiante corresponde al grado/nivel del curso
+    const studentAcademic = await fetchStudentAcademicData(estudianteId);
+    const assignmentLevelKey = normalizeLevelKey(assignment.level);
+    const assignmentGrade = assignment.grade_number != null ? Number(assignment.grade_number) : null;
+    const studentLevelKey = normalizeLevelKey(normalizeTextValue(studentAcademic?.nivel ?? studentAcademic?.nivel_estudiante));
+    const studentGrade = extractGradeNumber(studentAcademic?.grado ?? studentAcademic?.grade);
+
+    if (assignmentLevelKey && !studentLevelKey) {
+      return res.status(400).json({ error: 'El estudiante no tiene nivel registrado; completa sus datos académicos antes de asignar' });
+    }
+    if (assignmentLevelKey && studentLevelKey && assignmentLevelKey !== studentLevelKey) {
+      return res.status(400).json({ error: 'El nivel del estudiante no coincide con el nivel del curso' });
+    }
+    if (assignmentGrade != null && studentGrade === null) {
+      return res.status(400).json({ error: 'El estudiante no tiene grado registrado; completa sus datos académicos antes de asignar' });
+    }
+    if (assignmentGrade != null && studentGrade !== null && Number(assignmentGrade) !== Number(studentGrade)) {
+      return res.status(400).json({ error: 'El grado del estudiante no coincide con el grado del curso' });
+    }
+
+    const alreadyInAssignment = await studentIsEnrolled(id, estudianteId);
+    if (alreadyInAssignment) {
+      return res.status(409).json({ error: 'El estudiante ya esta inscrito en este grupo' });
+    }
+
+    const enrolledWithProfessorCourse = await studentEnrolledInSameCourseAndProfessor({
+      estudianteId,
+      cursoId: assignment.curso_id,
+      profesorId: assignment.profesor_id,
+      excludeAsignacionId: assignment.id,
+    });
+
+    if (enrolledWithProfessorCourse) {
+      return res.status(409).json({ error: 'El estudiante ya esta inscrito en otro grupo de este curso con este profesor' });
     }
 
     const total = await countEnrollments(id);
@@ -1236,6 +1366,12 @@ app.get(
         ae.estudiante_id,
         u.nombre AS estudiante_nombre,
         u.email AS estudiante_email,
+        CASE 
+          WHEN u.foto_perfil_imagen IS NOT NULL 
+            OR (u.foto_perfil IS NOT NULL AND u.foto_perfil <> '') 
+          THEN 1 
+          ELSE 0 
+        END AS estudiante_tiene_foto,
         ae.fecha_inscripcion
       FROM asignaciones_profesor_curso a
       LEFT JOIN asignacion_estudiantes ae ON ae.asignacion_id = a.id
@@ -1388,4 +1524,3 @@ app.use((err, req, res, next) => {
 httpServer.listen(env.PORT, () => {
   console.log(`API de Asignaciones con eventos en tiempo real corriendo en http://localhost:${env.PORT}`);
 });
-

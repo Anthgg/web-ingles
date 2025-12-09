@@ -1,73 +1,183 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import ConfirmDialog from './ui/ConfirmDialog';
-import { FaEdit, FaTrash, FaPlus, FaSearch, FaUserGraduate, FaBookOpen, FaCalendarAlt, FaCheck, FaTimes, FaClipboardCheck, FaClock, FaDownload } from 'react-icons/fa';
+import {
+  FaEdit,
+  FaTrash,
+  FaPlus,
+  FaSearch,
+  FaUserGraduate,
+  FaBookOpen,
+  FaCalendarAlt,
+  FaCheck,
+  FaTimes,
+  FaClipboardCheck,
+  FaClock,
+  FaDownload,
+  FaSync,
+  FaInfoCircle
+} from 'react-icons/fa';
 
-const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencias, showError, showSuccess }) => {
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ 
-    estudiante_id: '', 
-    materia_id: '', 
-    estado: 'presente',
-    fecha: ''
+const API_BASE_URL = 'http://localhost:3003/asistencias';
+
+const toIsoDate = (date) => date.toISOString().slice(0, 10);
+
+const toLocalDateTime = (dateStr) => {
+  if (!dateStr) return '';
+  const dt = new Date(dateStr);
+  if (Number.isNaN(dt.getTime())) {
+    return '';
+  }
+  return dt.toISOString().slice(0, 16);
+};
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  const time = parsed.getTime();
+  return Number.isNaN(time) ? null : time;
+};
+
+const formatDateTime = (value) => {
+  if (!value) return 'Sin fecha';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Sin fecha';
+  }
+  return parsed.toLocaleString('es-ES', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   });
+};
+
+const formatDateWithOptions = (value, options = {}) => {
+  if (!value) return 'Sin fecha';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Sin fecha';
+  }
+  return parsed.toLocaleDateString('es-ES', options);
+};
+
+const buildRangeFromDays = (days = 30) => {
+  const today = new Date();
+  const startDate = new Date();
+  startDate.setDate(today.getDate() - (days - 1));
+  return {
+    start: toIsoDate(startDate),
+    end: toIsoDate(today)
+  };
+};
+
+const getInitialFormState = () => ({
+  estudiante_id: '',
+  materia_id: '',
+  estado: 'presente',
+  fecha: ''
+});
+
+const AsistenciasList = ({
+  asistencias = [],
+  clases = [],
+  usuarios = [],
+  fetchAsistencias,
+  token,
+  showError,
+  showSuccess
+}) => {
+  const [formData, setFormData] = useState(getInitialFormState);
   const [editMode, setEditMode] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
-  const sortBy = 'fecha';
-  const sortOrder = 'desc';
+  const [filterMateria, setFilterMateria] = useState('');
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+  const [rangoFechas, setRangoFechas] = useState('30');
+  const [sortOrder, setSortOrder] = useState('desc');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [asistenciaToDelete, setAsistenciaToDelete] = useState(null);
+  const [selectedAsistencia, setSelectedAsistencia] = useState(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
-  // Convierte ISO string a formato local para input datetime-local
-  const toLocalDateTime = (dateStr) => {
-    if (!dateStr) return '';
-    const dt = new Date(dateStr);
-    const iso = dt.toISOString();
-    return iso.slice(0, 16);
-  };
+  const resolvedAsistencias = useMemo(() => (Array.isArray(asistencias) ? asistencias : []), [asistencias]);
+  const resolvedClases = useMemo(() => (Array.isArray(clases) ? clases : []), [clases]);
+  const resolvedUsuarios = useMemo(() => (Array.isArray(usuarios) ? usuarios : []), [usuarios]);
+
+  useEffect(() => {
+    if (!fechaInicio || !fechaFin) {
+      const range = buildRangeFromDays(Number(rangoFechas) || 30);
+      setFechaInicio((prev) => prev || range.start);
+      setFechaFin((prev) => prev || range.end);
+    }
+  }, [fechaInicio, fechaFin, rangoFechas]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const getBackendFilters = () => {
+    const filters = {};
+    if (filterEstado) {
+      filters.estado = filterEstado;
+    }
+    if (filterMateria) {
+      filters.materiaId = filterMateria;
+    }
+    if (fechaInicio) {
+      filters.desde = fechaInicio;
+    }
+    if (fechaFin) {
+      filters.hasta = fechaFin;
+    }
+    return filters;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const url = editMode 
-        ? `http://localhost:3003/asistencias/${formData.id}`
-        : 'http://localhost:3003/asistencias';
-      
+      const url = editMode ? `${API_BASE_URL}/${formData.id}` : API_BASE_URL;
       const method = editMode ? 'PUT' : 'POST';
-      
-      const bodyData = {
+      const payload = {
         estudiante_id: formData.estudiante_id,
         materia_id: formData.materia_id,
-        estado: formData.estado,
+        estado: formData.estado
       };
-      if (formData.fecha) bodyData.fecha = formData.fecha;
+      if (formData.fecha) {
+        payload.fecha = formData.fecha;
+      }
 
       const res = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify(bodyData)
+        body: JSON.stringify(payload)
       });
-      
+
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || (editMode ? 'Error al actualizar asistencia' : 'Error al crear asistencia'));
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(
+          errorData.error || (editMode ? 'Error al actualizar asistencia' : 'Error al crear asistencia')
+        );
       }
-      
-      showSuccess(editMode ? 'Asistencia actualizada correctamente' : 'Asistencia creada correctamente');
-      fetchAsistencias();
+
+      showSuccess && showSuccess(editMode ? 'Asistencia actualizada correctamente' : 'Asistencia creada correctamente');
       setShowModal(false);
+      if (fetchAsistencias) {
+        await fetchAsistencias(getBackendFilters());
+      }
     } catch (err) {
-      showError(err.message);
+      console.error('Error al guardar asistencia:', err);
+      showError && showError(err.message || 'No se pudo guardar la asistencia');
     } finally {
       setLoading(false);
     }
@@ -75,17 +185,22 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
 
   const handleDelete = async (id) => {
     try {
-      const res = await fetch(`http://localhost:3003/asistencias/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
-      if (!res.ok) throw new Error('Error al eliminar asistencia');
-      
-      showSuccess('Asistencia eliminada correctamente');
-      fetchAsistencias();
+
+      if (!res.ok) {
+        throw new Error('Error al eliminar asistencia');
+      }
+
+      showSuccess && showSuccess('Asistencia eliminada correctamente');
+      if (fetchAsistencias) {
+        await fetchAsistencias(getBackendFilters());
+      }
     } catch (err) {
-      showError(err.message);
+      console.error('Error al eliminar asistencia:', err);
+      showError && showError(err.message || 'No se pudo eliminar la asistencia');
     }
   };
 
@@ -94,11 +209,11 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
     setShowDeleteDialog(true);
   };
 
-  const confirmDelete = () => {
-    if (asistenciaToDelete) {
-      handleDelete(asistenciaToDelete.id);
-      setAsistenciaToDelete(null);
-    }
+  const confirmDelete = async () => {
+    if (!asistenciaToDelete) return;
+    await handleDelete(asistenciaToDelete.id);
+    setAsistenciaToDelete(null);
+    setShowDeleteDialog(false);
   };
 
   const handleEdit = (asistencia) => {
@@ -114,23 +229,58 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
   };
 
   const handleAdd = () => {
-    setFormData({ 
-      estudiante_id: '', 
-      materia_id: '', 
-      estado: 'presente',
-      fecha: ''
-    });
+    setFormData(getInitialFormState());
     setEditMode(false);
     setShowModal(true);
   };
 
+  const handleSync = async () => {
+    if (!fetchAsistencias) return;
+    setSyncing(true);
+    try {
+      await fetchAsistencias(getBackendFilters());
+      setLastSyncedAt(new Date());
+      showSuccess && showSuccess('Asistencias sincronizadas');
+    } catch (err) {
+      console.error('Error al sincronizar asistencias:', err);
+      showError && showError('No se pudo sincronizar con el backend');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleRangePresetChange = (value) => {
+    setRangoFechas(value);
+    if (value === 'custom') {
+      return;
+    }
+    const days = Number(value) || 30;
+    const range = buildRangeFromDays(days);
+    setFechaInicio(range.start);
+    setFechaFin(range.end);
+  };
+
+  const handleFechaInicioChange = (value) => {
+    setFechaInicio(value);
+    if (rangoFechas !== 'custom') {
+      setRangoFechas('custom');
+    }
+  };
+
+  const handleFechaFinChange = (value) => {
+    setFechaFin(value);
+    if (rangoFechas !== 'custom') {
+      setRangoFechas('custom');
+    }
+  };
+
   const getUsuarioNombre = (id) => {
-    const usuario = usuarios.find(u => u.id === id);
+    const usuario = resolvedUsuarios.find((u) => Number(u.id) === Number(id));
     return usuario ? usuario.nombre : 'Desconocido';
   };
 
   const getClaseNombre = (id) => {
-    const clase = clases.find(c => c.id === id);
+    const clase = resolvedClases.find((c) => Number(c.id) === Number(id));
     return clase ? clase.nombre : 'Desconocida';
   };
 
@@ -144,29 +294,117 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
     return configs[estado] || configs.presente;
   };
 
-  // Filtros y búsqueda
-  const filteredAsistencias = asistencias
-    .filter(asistencia => {
-      const estudiante = getUsuarioNombre(asistencia.estudiante_id).toLowerCase();
-      const clase = getClaseNombre(asistencia.materia_id).toLowerCase();
-      const searchLower = searchTerm.toLowerCase();
-      
-      const matchesSearch = estudiante.includes(searchLower) || clase.includes(searchLower);
-      const matchesFilter = filterEstado === '' || asistencia.estado === filterEstado;
-      
-      return matchesSearch && matchesFilter;
-    })
-    .sort((a, b) => {
-      const order = sortOrder === 'asc' ? 1 : -1;
-      if (sortBy === 'fecha') {
-        return order * (new Date(a.fecha) - new Date(b.fecha));
-      }
-      return order * a[sortBy]?.localeCompare(b[sortBy]);
+  const asistenciasOrdenadas = useMemo(() => {
+    return [...resolvedAsistencias].sort((a, b) => {
+      const fechaA = parseDate(a?.fecha) || 0;
+      const fechaB = parseDate(b?.fecha) || 0;
+      return fechaB - fechaA;
     });
+  }, [resolvedAsistencias]);
+
+  const filteredAsistencias = useMemo(() => {
+    const searchLower = searchTerm.trim().toLowerCase();
+    const estadoFiltro = filterEstado.trim().toLowerCase();
+    const materiaFiltro = filterMateria ? Number(filterMateria) : null;
+    const fechaInicioDate = parseDate(fechaInicio);
+    const fechaFinDate = parseDate(fechaFin);
+
+    return asistenciasOrdenadas.filter((asistencia) => {
+      if (estadoFiltro && asistencia.estado !== estadoFiltro) {
+        return false;
+      }
+
+      if (materiaFiltro && Number(asistencia.materia_id) !== materiaFiltro) {
+        return false;
+      }
+
+      const fechaRegistro = parseDate(asistencia.fecha);
+      if (fechaRegistro && fechaInicioDate && fechaRegistro < fechaInicioDate) {
+        return false;
+      }
+      if (fechaRegistro && fechaFinDate && fechaRegistro > fechaFinDate) {
+        return false;
+      }
+
+      if (searchLower) {
+        const estudianteNombre = getUsuarioNombre(asistencia.estudiante_id).toLowerCase();
+        const claseNombre = getClaseNombre(asistencia.materia_id).toLowerCase();
+        if (!estudianteNombre.includes(searchLower) && !claseNombre.includes(searchLower)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [asistenciasOrdenadas, searchTerm, filterEstado, filterMateria, fechaInicio, fechaFin]);
+
+  const resumenEstados = useMemo(() => {
+    const base = { presente: 0, ausente: 0, justificado: 0, tardanza: 0 };
+    filteredAsistencias.forEach((registro) => {
+      const key = registro.estado || 'presente';
+      base[key] = (base[key] || 0) + 1;
+    });
+    return base;
+  }, [filteredAsistencias]);
+
+  const resumenCursos = useMemo(() => {
+    return filteredAsistencias.reduce((acc, registro) => {
+      const key = registro.materia_id ?? 'sin-curso';
+      const normalized = String(key);
+      acc[normalized] = (acc[normalized] || 0) + 1;
+      return acc;
+    }, {});
+  }, [filteredAsistencias]);
+
+  const topCursos = useMemo(() => {
+    return Object.entries(resumenCursos)
+      .map(([id, total]) => ({
+        id,
+        total,
+        nombre: id === 'sin-curso' ? 'Sin curso asignado' : getClaseNombre(id)
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 3);
+  }, [resumenCursos]);
+
+  const timelineRecords = useMemo(() => {
+    const ordered = [...filteredAsistencias];
+    if (sortOrder === 'asc') {
+      ordered.reverse();
+    }
+    return ordered.slice(0, 40);
+  }, [filteredAsistencias, sortOrder]);
+
+  useEffect(() => {
+    if (!timelineRecords.length) {
+      if (selectedAsistencia) {
+        setSelectedAsistencia(null);
+      }
+      return;
+    }
+    const exists = selectedAsistencia && timelineRecords.some((item) => item.id === selectedAsistencia.id);
+    if (!selectedAsistencia || !exists) {
+      setSelectedAsistencia(timelineRecords[0]);
+    }
+  }, [timelineRecords, selectedAsistencia]);
+
+  const detalleActual = selectedAsistencia;
+  const totalRegistros = filteredAsistencias.length;
+  const totalPresentes = resumenEstados.presente || 0;
+  const totalAusentes = resumenEstados.ausente || 0;
+  const totalJustificados = resumenEstados.justificado || 0;
+  const totalTardanzas = resumenEstados.tardanza || 0;
+  const detalleCurso = detalleActual
+    ? resolvedClases.find((curso) => Number(curso.id) === Number(detalleActual.materia_id))
+    : null;
+  const detalleEstudiante = detalleActual
+    ? resolvedUsuarios.find((user) => Number(user.id) === Number(detalleActual.estudiante_id))
+    : null;
+  const ultimaSincronizacionLabel = lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Pendiente';
 
   return (
     <>
-  <style>{`
+      <style>{`
         .asistencias-container {
           background: var(--bg-primary, #ffffff);
           border-radius: 16px;
@@ -218,43 +456,105 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           backdrop-filter: blur(10px);
         }
 
-        .header-stats {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          gap: 24px;
-          margin-top: 24px;
+        .header-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 16px;
+          margin-top: 12px;
+          font-size: 0.95rem;
+          opacity: 0.85;
         }
 
-        .stat-item {
-          text-align: center;
-          padding: 16px;
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 12px;
-          backdrop-filter: blur(10px);
-        }
-
-        .stat-number {
-          font-size: 24px;
+        .header-heading {
+          margin: 0;
+          font-size: 28px;
           font-weight: 700;
-          margin-bottom: 4px;
         }
 
-        .stat-label {
-          font-size: 14px;
+        .header-subtitle {
+          margin: 6px 0 0;
           opacity: 0.9;
         }
 
-        .controls-section {
+        .analytics-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 16px;
+          margin-top: 24px;
+        }
+
+        .analytics-card {
+          background: rgba(255, 255, 255, 0.12);
+          border-radius: 16px;
+          padding: 16px;
+          backdrop-filter: blur(6px);
+        }
+
+        .analytics-label {
+          margin: 0;
+          font-size: 0.85rem;
+          opacity: 0.85;
+        }
+
+        .analytics-value {
+          margin: 4px 0 0;
+          font-size: 1.75rem;
+          font-weight: 700;
+        }
+
+        .text-success { color: #10b981; }
+        .text-danger { color: #ef4444; }
+
+        .filters-panel {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 16px;
           padding: 24px 32px;
           border-bottom: 1px solid var(--border-color, #e2e8f0);
+          background: var(--bg-primary, #ffffff);
+        }
+
+        .filter-field {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .filter-field label {
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: var(--text-secondary, #64748b);
+        }
+
+        .search-field {
+          grid-column: span 2;
+        }
+
+        .date-range-field .date-inputs {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .date-inputs input {
+          flex: 1;
+          border: 2px solid var(--border-color, #e2e8f0);
+          border-radius: 12px;
+          padding: 10px 12px;
           background: var(--bg-secondary, #f8fafc);
         }
 
-        .controls-grid {
-          display: grid;
-          grid-template-columns: 1fr auto auto auto;
-          gap: 16px;
-          align-items: center;
+        .date-separator {
+          font-weight: 600;
+          color: var(--text-muted, #6b7280);
+        }
+
+        .filter-actions {
+          display: flex;
+          align-items: stretch;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
         }
 
         .search-box {
@@ -323,6 +623,11 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           text-overflow: ellipsis;
         }
 
+        .action-btn.compact {
+          padding: 8px 12px;
+          min-height: 36px;
+        }
+
         .btn-primary {
           background: linear-gradient(135deg, #3b82f6, #1d4ed8);
           color: white;
@@ -360,110 +665,158 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           border-color: #3b82f6;
         }
 
-        .asistencias-grid {
+        .asistencias-content-grid {
           display: grid;
-          gap: 16px;
-          padding: 24px 32px;
+          grid-template-columns: 2fr 1fr;
+          gap: 24px;
+          padding: 24px 32px 40px;
         }
 
-        .asistencia-card {
+        .timeline-panel,
+        .detail-panel {
           background: var(--bg-primary, #ffffff);
-          border: 2px solid var(--border-color, #e2e8f0);
-          border-radius: 16px;
+          border: 1px solid var(--border-color, #e2e8f0);
+          border-radius: 20px;
           padding: 24px;
-          transition: all 0.3s ease;
-          position: relative;
-          overflow: hidden;
+          box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+          display: flex;
+          flex-direction: column;
+          min-height: 400px;
         }
 
-        .asistencia-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
-          border-color: #3b82f6;
-        }
-
-        .card-header {
+        .panel-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
           margin-bottom: 16px;
         }
 
-        .card-info {
-          flex: 1;
+        .panel-subtitle {
+          margin: 4px 0 0;
+          color: var(--text-muted, #6b7280);
+          font-size: 0.9rem;
         }
 
-        .student-name {
-          font-size: 18px;
+        .timeline-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          overflow-y: auto;
+          padding-right: 8px;
+        }
+
+        .timeline-row {
+          border: 1px solid var(--border-color, #e2e8f0);
+          border-radius: 16px;
+          padding: 16px;
+          display: grid;
+          grid-template-columns: 140px 1fr auto;
+          gap: 16px;
+          align-items: center;
+          text-align: left;
+          background: var(--bg-secondary, #f8fafc);
+          transition: all 0.2s ease;
+          cursor: pointer;
+        }
+
+        .timeline-row.active {
+          border-color: #3b82f6;
+          background: rgba(59, 130, 246, 0.08);
+          box-shadow: 0 10px 20px rgba(59, 130, 246, 0.15);
+        }
+
+        .timeline-row:hover {
+          transform: translateY(-2px);
+        }
+
+        .timeline-date span {
           font-weight: 700;
-          color: var(--text-primary, #0f172a);
-          margin-bottom: 4px;
         }
 
-        .class-name {
-          color: var(--text-secondary, #64748b);
-          font-size: 14px;
-          margin-bottom: 8px;
+        .timeline-date small {
+          display: block;
+          color: var(--text-muted, #6b7280);
+          text-transform: capitalize;
         }
 
-        .estado-badge {
+        .timeline-info p {
+          margin: 4px 0 0;
+          color: var(--text-muted, #6b7280);
+        }
+
+        .timeline-status {
+          border-radius: 999px;
+          padding: 8px 14px;
+          font-weight: 600;
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
+          text-transform: capitalize;
         }
 
-        .fecha-info {
-          display: flex;
-          align-items: center;
-          gap: 6px;
+        .timeline-empty {
+          text-align: center;
+          padding: 48px 24px;
+          border: 1px dashed var(--border-color, #dbeafe);
+          border-radius: 16px;
+        }
+
+        .timeline-empty-icon {
           color: var(--text-muted, #6b7280);
-          font-size: 13px;
-          margin-top: 12px;
+          margin-bottom: 12px;
         }
 
-        .card-actions {
+        .detail-body {
+          display: grid;
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+
+        .detail-field {
+          background: var(--bg-secondary, #f8fafc);
+          border: 1px solid var(--border-color, #e2e8f0);
+          border-radius: 12px;
+          padding: 12px 16px;
+        }
+
+        .detail-label {
+          display: block;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: var(--text-muted, #6b7280);
+          margin-bottom: 4px;
+        }
+
+        .detail-value {
+          margin: 0;
+          font-size: 1rem;
+        }
+
+        .detail-actions {
           display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 16px;
+        }
+
+        .top-courses ul {
+          list-style: none;
+          padding: 0;
+          margin: 12px 0 0;
+          display: flex;
+          flex-direction: column;
           gap: 8px;
-          flex-shrink: 0;
         }
 
-        .icon-btn {
-          width: 36px;
-          height: 36px;
-          border: none;
-          border-radius: 8px;
+        .top-courses li {
           display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          flex-shrink: 0;
+          justify-content: space-between;
+          padding: 8px 0;
+          border-bottom: 1px solid var(--border-color, #e2e8f0);
         }
 
-        .icon-btn.edit {
-          background: #fef3c7;
-          color: #d97706;
-        }
-
-        .icon-btn.edit:hover {
-          background: #fcd34d;
-          transform: scale(1.1);
-        }
-
-        .icon-btn.delete {
-          background: #fee2e2;
-          color: #dc2626;
-        }
-
-        .icon-btn.delete:hover {
-          background: #fca5a5;
-          transform: scale(1.1);
+        .capitalize {
+          text-transform: capitalize;
         }
 
         .modal-overlay {
@@ -588,24 +941,6 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           flex-shrink: 0;
         }
 
-        .empty-state {
-          text-align: center;
-          padding: 64px 32px;
-          color: var(--text-muted, #6b7280);
-        }
-
-        .empty-icon {
-          width: 64px;
-          height: 64px;
-          background: var(--bg-secondary, #f8fafc);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin: 0 auto 16px;
-        }
-
-        /* Animaciones */
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
@@ -627,28 +962,31 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           to { transform: rotate(360deg); }
         }
 
-        /* Responsive */
         @media (max-width: 768px) {
           .asistencias-header {
             padding: 24px;
           }
 
-          .controls-section {
+          .filters-panel {
             padding: 16px 24px;
-          }
-
-          .controls-grid {
             grid-template-columns: 1fr;
-            gap: 12px;
           }
 
-          .asistencias-grid {
-            padding: 16px 24px;
+          .search-field {
+            grid-column: span 1;
           }
 
-          .header-stats {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
+          .filter-actions {
+            justify-content: flex-start;
+          }
+
+          .asistencias-content-grid {
+            grid-template-columns: 1fr;
+            padding: 16px 24px 32px;
+          }
+
+          .timeline-row {
+            grid-template-columns: 1fr;
           }
 
           .modal-content {
@@ -670,15 +1008,6 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
             min-width: auto;
           }
 
-          .card-header {
-            flex-direction: column;
-            gap: 16px;
-          }
-
-          .card-actions {
-            align-self: flex-end;
-          }
-
           .action-btn {
             min-width: auto;
             width: 100%;
@@ -692,10 +1021,6 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
             font-size: 13px;
             min-height: 40px;
             gap: 6px;
-          }
-
-          .controls-grid {
-            gap: 8px;
           }
 
           .filter-select {
@@ -718,11 +1043,11 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
             font-size: 12px;
             gap: 4px;
           }
-          
+
           .btn-primary {
             min-width: 120px;
           }
-          
+
           .btn-secondary {
             min-width: 90px;
           }
@@ -730,7 +1055,6 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
       `}</style>
 
       <div className="asistencias-container">
-        {/* Header */}
         <div className="asistencias-header">
           <div className="header-content">
             <div className="header-title">
@@ -738,56 +1062,60 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                 <FaClipboardCheck size={20} />
               </div>
               <div>
-                <h1 style={{ margin: 0, fontSize: '28px', fontWeight: '700' }}>
-                  Control de Asistencias
-                </h1>
-                <p style={{ margin: '4px 0 0 0', opacity: 0.9 }}>
-                  Gestiona y monitorea la asistencia de estudiantes
+                <h1 className="header-heading">Panel de Control de Asistencias</h1>
+                <p className="header-subtitle">
+                  Sincroniza lo que registran docentes y los ajustes de coordinación.
                 </p>
               </div>
             </div>
-
-            <div className="header-stats">
-              <div className="stat-item">
-                <div className="stat-number">{asistencias.length}</div>
-                <div className="stat-label">Total Registros</div>
+            <div className="header-meta">
+              <span>
+                Última sincronización: <strong>{ultimaSincronizacionLabel}</strong>
+              </span>
+              <span>
+                Mostrando <strong>{totalRegistros}</strong> registros filtrados
+              </span>
+            </div>
+            <div className="analytics-grid">
+              <div className="analytics-card">
+                <p className="analytics-label">Total registrados</p>
+                <p className="analytics-value">{totalRegistros}</p>
               </div>
-              <div className="stat-item">
-                <div className="stat-number">
-                  {asistencias.filter(a => a.estado === 'presente').length}
-                </div>
-                <div className="stat-label">Presentes</div>
+              <div className="analytics-card">
+                <p className="analytics-label">Presentes</p>
+                <p className="analytics-value text-success">{totalPresentes}</p>
               </div>
-              <div className="stat-item">
-                <div className="stat-number">
-                  {asistencias.filter(a => a.estado === 'ausente').length}
-                </div>
-                <div className="stat-label">Ausentes</div>
+              <div className="analytics-card">
+                <p className="analytics-label">Ausentes</p>
+                <p className="analytics-value text-danger">{totalAusentes}</p>
               </div>
-              <div className="stat-item">
-                <div className="stat-number">
-                  {asistencias.filter(a => a.estado === 'justificado').length}
-                </div>
-                <div className="stat-label">Justificados</div>
+              <div className="analytics-card">
+                <p className="analytics-label">Justificados / Tardanzas</p>
+                <p className="analytics-value">
+                  {totalJustificados} / {totalTardanzas}
+                </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="controls-section">
-          <div className="controls-grid">
+        <div className="filters-panel">
+          <div className="filter-field search-field">
+            <label>Búsqueda rápida</label>
             <div className="search-box">
               <input
                 type="text"
                 className="search-input"
-                placeholder="Buscar por estudiante o clase..."
+                placeholder="Nombre del estudiante o curso"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
               <FaSearch className="search-icon" size={16} />
             </div>
+          </div>
 
+          <div className="filter-field">
+            <label>Estado</label>
             <select
               className="filter-select"
               value={filterEstado}
@@ -799,94 +1127,216 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
               <option value="justificado">Justificado</option>
               <option value="tardanza">Tardanza</option>
             </select>
+          </div>
 
-            <button className="action-btn btn-secondary">
+          <div className="filter-field">
+            <label>Curso</label>
+            <select
+              className="filter-select"
+              value={filterMateria}
+              onChange={(e) => setFilterMateria(e.target.value)}
+            >
+              <option value="">Todos los cursos</option>
+              {resolvedClases.map((curso) => (
+                <option key={curso.id} value={curso.id}>
+                  {curso.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="filter-field">
+            <label>Rango rápido</label>
+            <select
+              className="filter-select"
+              value={rangoFechas}
+              onChange={(e) => handleRangePresetChange(e.target.value)}
+            >
+              <option value="7">Últimos 7 días</option>
+              <option value="30">Últimos 30 días</option>
+              <option value="90">Últimos 90 días</option>
+              <option value="365">Último año</option>
+              <option value="custom">Personalizado</option>
+            </select>
+          </div>
+
+          <div className="filter-field date-range-field">
+            <label>Entre fechas</label>
+            <div className="date-inputs">
+              <input type="date" value={fechaInicio || ''} onChange={(e) => handleFechaInicioChange(e.target.value)} />
+              <span className="date-separator">→</span>
+              <input type="date" value={fechaFin || ''} onChange={(e) => handleFechaFinChange(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="filter-actions">
+            <button
+              className="action-btn btn-secondary"
+              onClick={handleSync}
+              disabled={syncing}
+              title="Actualizar registros desde el backend"
+              type="button"
+            >
+              <FaSync size={14} className={syncing ? 'fa-spin' : ''} />
+              {syncing ? 'Sincronizando' : 'Sincronizar'}
+            </button>
+
+            <button className="action-btn btn-secondary" type="button">
               <FaDownload size={14} />
               Exportar
             </button>
 
-            <button className="action-btn btn-primary" onClick={handleAdd}>
+            <button className="action-btn btn-primary" onClick={handleAdd} type="button">
               <FaPlus size={14} />
               Nueva Asistencia
             </button>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="asistencias-grid">
-          {filteredAsistencias.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">
-                <FaClipboardCheck size={24} />
+        <div className="asistencias-content-grid">
+          <div className="timeline-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Historial registrado</h3>
+                <p className="panel-subtitle">Últimos {timelineRecords.length} eventos sincronizados.</p>
               </div>
-              <h3>No hay registros de asistencia</h3>
-              <p>Comienza agregando una nueva asistencia</p>
+              <button
+                type="button"
+                className="action-btn btn-secondary compact"
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+              >
+                {sortOrder === 'asc' ? 'Recientes primero' : 'Antiguos primero'}
+              </button>
             </div>
-          ) : (
-            (Array.isArray(filteredAsistencias) ? filteredAsistencias : []).map((asistencia) => {
-              const estadoConfig = getEstadoConfig(asistencia.estado);
-              const IconComponent = estadoConfig.icon;
-              
-              return (
-                <div key={asistencia.id} className="asistencia-card">
-                  <div className="card-header">
-                    <div className="card-info">
-                      <div className="student-name">
-                        {getUsuarioNombre(asistencia.estudiante_id)}
+            {timelineRecords.length === 0 ? (
+              <div className="timeline-empty">
+                <FaClipboardCheck size={32} className="timeline-empty-icon" />
+                <h4>No hay registros con los filtros actuales</h4>
+                <p>Prueba ajustando el rango de fechas o sincroniza nuevamente.</p>
+              </div>
+            ) : (
+              <div className="timeline-list">
+                {timelineRecords.map((registro) => {
+                  const estadoConfig = getEstadoConfig(registro.estado);
+                  const IconComponent = estadoConfig.icon;
+                  const isActive = detalleActual && registro.id === detalleActual.id;
+                  const fechaLabel = formatDateWithOptions(registro.fecha, {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  });
+                  return (
+                    <button
+                      type="button"
+                      key={registro.id || `${registro.estudiante_id}-${registro.fecha}`}
+                      className={`timeline-row ${isActive ? 'active' : ''}`}
+                      onClick={() => setSelectedAsistencia(registro)}
+                    >
+                      <div className="timeline-date">
+                        <span className="timeline-day">{fechaLabel}</span>
+                        <small>{formatDateWithOptions(registro.fecha, { weekday: 'long' })}</small>
                       </div>
-                      <div className="class-name">
-                        📚 {getClaseNombre(asistencia.materia_id)}
+                      <div className="timeline-info">
+                        <strong>{getUsuarioNombre(registro.estudiante_id)}</strong>
+                        <p>{getClaseNombre(registro.materia_id)}</p>
                       </div>
-                      <div
-                        className="estado-badge"
-                        style={{
-                          color: estadoConfig.color,
-                          background: estadoConfig.bg
-                        }}
-                      >
+                      <div className="timeline-status" style={{ color: estadoConfig.color, background: estadoConfig.bg }}>
                         <IconComponent size={12} />
                         {estadoConfig.label}
                       </div>
-                      <div className="fecha-info">
-                        <FaCalendarAlt size={12} />
-                        {asistencia.fecha ? new Date(asistencia.fecha).toLocaleString('es-ES') : 'Sin fecha'}
-                      </div>
-                    </div>
-                    <div className="card-actions">
-                      <button
-                        className="icon-btn edit"
-                        onClick={() => handleEdit(asistencia)}
-                        title="Editar"
-                      >
-                        <FaEdit size={14} />
-                      </button>
-                      <button
-                        className="icon-btn delete"
-                        onClick={() => handleDeleteClick(asistencia)}
-                        title="Eliminar"
-                      >
-                        <FaTrash size={14} />
-                      </button>
-                    </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="detail-panel">
+            {detalleActual ? (
+              <>
+                <div className="panel-header">
+                  <div>
+                    <h3>Detalle seleccionado</h3>
+                    <p className="panel-subtitle">
+                      Actualizado {formatDateTime(detalleActual.fecha_modificacion || detalleActual.fecha)}
+                    </p>
                   </div>
                 </div>
-              );
-            })
-          )}
+                <div className="detail-body">
+                  <div className="detail-field">
+                    <span className="detail-label">Estudiante</span>
+                    <p className="detail-value">
+                      {detalleEstudiante?.nombre || getUsuarioNombre(detalleActual.estudiante_id)}
+                    </p>
+                  </div>
+                  <div className="detail-field">
+                    <span className="detail-label">Curso</span>
+                    <p className="detail-value">
+                      {detalleCurso?.nombre || getClaseNombre(detalleActual.materia_id)}
+                    </p>
+                  </div>
+                  <div className="detail-field">
+                    <span className="detail-label">Fecha registrada</span>
+                    <p className="detail-value">
+                      {formatDateWithOptions(detalleActual.fecha, {
+                        weekday: 'long',
+                        day: '2-digit',
+                        month: 'long',
+                        year: 'numeric'
+                      })}
+                    </p>
+                  </div>
+                  <div className="detail-field">
+                    <span className="detail-label">Estado</span>
+                    <p className="detail-value capitalize">{detalleActual.estado}</p>
+                  </div>
+                  <div className="detail-field">
+                    <span className="detail-label">Observaciones</span>
+                    <p className="detail-value">
+                      {detalleActual.observaciones || 'Sin observaciones registradas.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="detail-actions">
+                  <button className="action-btn btn-primary" onClick={() => handleEdit(detalleActual)}>
+                    <FaEdit size={14} /> Editar registro
+                  </button>
+                  <button className="action-btn btn-secondary" onClick={() => handleDeleteClick(detalleActual)}>
+                    <FaTrash size={14} /> Eliminar
+                  </button>
+                </div>
+                <div className="top-courses">
+                  <h4>Cursos con más registros en el filtro</h4>
+                  {topCursos.length === 0 ? (
+                    <p className="panel-subtitle">Aún no hay suficientes datos.</p>
+                  ) : (
+                    <ul>
+                      {topCursos.map((curso) => (
+                        <li key={curso.id}>
+                          <span>{curso.nombre}</span>
+                          <strong>{curso.total}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="timeline-empty">
+                <FaInfoCircle size={32} className="timeline-empty-icon" />
+                <h4>Selecciona una asistencia</h4>
+                <p>Haz clic en cualquier evento del historial para ver los detalles completos.</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Modal */}
         {showModal && (
           <div className="modal-overlay" onClick={() => setShowModal(false)}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h2 className="modal-title">
-                  {editMode ? 'Editar Asistencia' : 'Nueva Asistencia'}
-                </h2>
-                <button
-                  className="close-btn"
-                  onClick={() => setShowModal(false)}
-                >
+                <h2 className="modal-title">{editMode ? 'Editar Asistencia' : 'Nueva Asistencia'}</h2>
+                <button className="close-btn" onClick={() => setShowModal(false)}>
                   <FaTimes size={14} />
                 </button>
               </div>
@@ -906,11 +1356,13 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                       required
                     >
                       <option value="">Seleccionar estudiante</option>
-                      {usuarios.filter(u => u.rol === 'estudiante').map(usuario => (
-                        <option key={usuario.id} value={usuario.id}>
-                          {usuario.nombre}
-                        </option>
-                      ))}
+                      {resolvedUsuarios
+                        .filter((u) => u.rol === 'estudiante')
+                        .map((usuario) => (
+                          <option key={usuario.id} value={usuario.id}>
+                            {usuario.nombre}
+                          </option>
+                        ))}
                     </select>
                   </div>
 
@@ -927,7 +1379,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                       required
                     >
                       <option value="">Seleccionar clase</option>
-                      {clases.map(clase => (
+                      {resolvedClases.map((clase) => (
                         <option key={clase.id} value={clase.id}>
                           {clase.nombre}
                         </option>
@@ -978,11 +1430,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
                   >
                     Cancelar
                   </button>
-                  <button
-                    type="submit"
-                    className="action-btn btn-primary"
-                    disabled={loading}
-                  >
+                  <button type="submit" className="action-btn btn-primary" disabled={loading}>
                     {loading ? (
                       <>
                         <div className="spinner"></div>
@@ -998,7 +1446,6 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           </div>
         )}
 
-        {/* Confirm Delete Dialog */}
         <ConfirmDialog
           isOpen={showDeleteDialog}
           onClose={() => {
@@ -1007,7 +1454,7 @@ const AsistenciasList = ({ asistencias, usuarios, clases, token, fetchAsistencia
           }}
           onConfirm={confirmDelete}
           title="¿Eliminar asistencia?"
-          message={`¿Estás seguro de que deseas eliminar esta asistencia? Esta acción no se puede deshacer.`}
+          message="¿Estás seguro de que deseas eliminar esta asistencia? Esta acción no se puede deshacer."
           confirmText="Sí, eliminar"
           cancelText="Cancelar"
           type="danger"

@@ -13,6 +13,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import apiClient from '../api/client';
 import { teacherApi } from '../api';
+import UserAvatar from '../components/UserAvatar';
 import './CalificacionesPanel.css';
 
 const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -671,12 +672,11 @@ const CalificacionesPanel = ({
                             <td>
                               <div className="calificaciones-panel__student">
                                 <span className="calificaciones-panel__avatar">
-                                  {participante.nombre
-                                    ?.split(' ')
-                                    .map((word) => word[0])
-                                    .join('')
-                                    .slice(0, 2)
-                                    .toUpperCase() || 'ED'}
+                                  <UserAvatar 
+                                    userId={participante.usuario_id}
+                                    nombre={participante.nombre}
+                                    size="sm"
+                                  />
                                 </span>
                                 <div>
                                   <strong>{participante.nombre}</strong>

@@ -1,6 +1,20 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
-import { FaUserPlus, FaUserGraduate, FaSave, FaTimes, FaUsers, FaChalkboardTeacher, FaCalendarAlt, FaClock, FaSearch, FaStar, FaGraduationCap, FaBookOpen, FaSchool } from 'react-icons/fa';
+import { FaUserPlus, FaUserGraduate, FaSave, FaTimes, FaUsers, FaChalkboardTeacher, FaCalendarAlt, FaClock, FaSearch, FaStar, FaGraduationCap, FaBookOpen, FaSchool, FaCheckCircle, FaExclamationTriangle, FaBook } from 'react-icons/fa';
+
+const startOfToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+};
 
 const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
   // Estados
@@ -20,7 +34,28 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
   });
   const [showForm, setShowForm] = useState(false);
   const [cursoSeleccionado, setCursoSeleccionado] = useState(null);
+  const [cursosConEstudiantes, setCursosConEstudiantes] = useState([]);
+  const [expandedCursos, setExpandedCursos] = useState(new Set());
+  const [loadingEstudiantesAsignacion, setLoadingEstudiantesAsignacion] = useState(false);
   const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3007';
+  const today = useMemo(() => startOfToday(), []);
+
+  const isCursoPasado = useCallback((curso) => {
+    if (!curso) return false;
+    const fechaFin = curso.fecha_fin || curso.fechaFin || curso.endDate || null;
+    const normalized = normalizeDateOnly(fechaFin);
+    return normalized ? normalized < today : false;
+  }, [today]);
+
+  const cursosActivos = useMemo(
+    () => cursosProfesores.filter((curso) => !isCursoPasado(curso)),
+    [cursosProfesores, isCursoPasado]
+  );
+
+  const cursosHistoricos = useMemo(
+    () => cursosProfesores.filter((curso) => isCursoPasado(curso)),
+    [cursosProfesores, isCursoPasado]
+  );
 
   const normalizeText = useCallback((value) => {
     if (value === null || value === undefined) return null;
@@ -42,14 +77,38 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
     return value;
   }, []);
 
+  const canonicalizeLevel = useCallback((value) => {
+    const normalized = normalizeText(value);
+    if (!normalized) return null;
+    return normalized
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }, [normalizeText]);
+
+  const extractGradeNumber = useCallback((value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Number(value);
+    }
+    if (typeof value === 'string') {
+      const match = value.match(/\d+/);
+      if (match && match[0]) {
+        return Number(match[0]);
+      }
+    }
+    return null;
+  }, []);
+
   const resolveEstudianteId = useCallback((estudiante) => {
     if (!estudiante) return null;
     return (
+      estudiante.estudiante_id ??
+      estudiante.usuario_id ??
+      estudiante.userId ??
       estudiante._id ??
       estudiante.id ??
       estudiante.ID ??
-      estudiante.usuario_id ??
-      estudiante.userId ??
       null
     );
   }, []);
@@ -105,28 +164,16 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
     formatSectionLabel(curso?.section ?? null),
   ].join(' • ');
 
-  const asignacionSeleccionada = useMemo(() => {
-    if (!formData.asignacionId) return null;
-    return (
-      cursosProfesores.find((cp) => {
-        const resolvedId = resolveCursoId(cp);
-        return resolvedId !== null && String(resolvedId) === String(formData.asignacionId);
-      }) || null
-    );
-  }, [formData.asignacionId, cursosProfesores, resolveCursoId]);
-
-  const aulaBloqueada = useMemo(() => {
-    if (!asignacionSeleccionada) return false;
-    const nivel = normalizeText(asignacionSeleccionada.level);
-    const grado = normalizeGrade(asignacionSeleccionada.grade_number);
-    const seccion = normalizeText(asignacionSeleccionada.section);
-    return Boolean(nivel && grado !== null && seccion);
-  }, [asignacionSeleccionada, normalizeGrade, normalizeText]);
-
   // Obtener estudiantes del listado de usuarios y asignar ciclo 1 automáticamente si es nuevo
   useEffect(() => {
     if (Array.isArray(usuarios)) {
       const estudiantesFiltrados = usuarios.filter((usuario) => usuario.rol === 'estudiante');
+      console.log('[AsignacionEstudiantes] Estudiantes desde usuarios:', estudiantesFiltrados.map((e) => ({
+        id: resolveEstudianteId(e),
+        nombre: e.nombre,
+        nivel_estudiante: e.nivel_estudiante ?? e.nivel ?? e?.datos_estudiante?.nivel ?? null,
+        grado_estudiante: e.grado_estudiante ?? e.grado ?? e?.datos_estudiante?.grado ?? null,
+      })));
       setEstudiantes(estudiantesFiltrados);
     }
   }, [usuarios]);
@@ -166,13 +213,299 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
     fetchCursosProfesores();
   }, [token, fetchCursosProfesores]);
 
-  // Eliminado: la carga de ciclos ahora se hace en el dashboard y se pasa por prop
+  // Función para cargar estudiantes de un curso específico
+  const fetchEstudiantesCurso = useCallback(async (cursoId) => {
+    try {
+      const response = await axios.get(
+        `${apiBaseUrl}/asignaciones/${cursoId}/estudiantes`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (error) {
+      console.error(`Error cargando estudiantes del curso ${cursoId}:`, error);
+      return [];
+    }
+  }, [apiBaseUrl, token]);
+
+  const actualizarEstudiantesAsignacion = useCallback(
+    async (curso) => {
+      const cursoId = resolveCursoId(curso);
+      if (!cursoId) return;
+      setLoadingEstudiantesAsignacion(true);
+      try {
+        const estudiantesCurso = await fetchEstudiantesCurso(cursoId);
+        setCursosConEstudiantes((prev) => {
+          const idx = prev.findIndex((c) => resolveCursoId(c) === cursoId);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], estudiantesAsignados: estudiantesCurso };
+            return updated;
+          }
+          return [...prev, { ...curso, estudiantesAsignados: estudiantesCurso }];
+        });
+      } catch (error) {
+        console.error('Error cargando estudiantes del curso seleccionado:', error);
+      } finally {
+        setLoadingEstudiantesAsignacion(false);
+      }
+    },
+    [fetchEstudiantesCurso, resolveCursoId]
+  );
+
+  // Cargar estudiantes cuando se expanda un curso
+  useEffect(() => {
+    const loadEstudiantes = async () => {
+      const cursosConDatos = await Promise.all(
+        cursosActivos.map(async (curso) => {
+          const cursoId = curso.id || curso._id;
+          if (expandedCursos.has(cursoId)) {
+            const estudiantesCurso = await fetchEstudiantesCurso(cursoId);
+            return { ...curso, estudiantesAsignados: estudiantesCurso };
+          }
+          return { ...curso, estudiantesAsignados: [] };
+        })
+      );
+      setCursosConEstudiantes(cursosConDatos);
+    };
+    
+    if (cursosActivos.length > 0) {
+      loadEstudiantes();
+    }
+  }, [cursosActivos, expandedCursos, fetchEstudiantesCurso]);
+
+  const estudianteSeleccionado = useMemo(() => {
+    if (!formData.estudianteId) return null;
+    return (
+      estudiantes.find((est) => {
+        const resolvedId = resolveEstudianteId(est);
+        return resolvedId !== null && String(resolvedId) === String(formData.estudianteId);
+      }) || null
+    );
+  }, [formData.estudianteId, estudiantes, resolveEstudianteId]);
+
+  const estudianteNivel = useMemo(() => {
+    if (!estudianteSeleccionado) return null;
+    const levelCandidate =
+      estudianteSeleccionado.nivel_estudiante ??
+      estudianteSeleccionado.nivel ??
+      estudianteSeleccionado?.datos_estudiante?.nivel ??
+      null;
+    return normalizeText(levelCandidate);
+  }, [estudianteSeleccionado, normalizeText]);
+
+  const estudianteNivelKey = useMemo(
+    () => canonicalizeLevel(estudianteNivel),
+    [canonicalizeLevel, estudianteNivel]
+  );
+
+  const estudianteGradoNumero = useMemo(() => {
+    if (!estudianteSeleccionado) return null;
+    const gradeCandidate =
+      estudianteSeleccionado.grado_estudiante ??
+      estudianteSeleccionado.grado ??
+      estudianteSeleccionado?.datos_estudiante?.grado ??
+      null;
+    return extractGradeNumber(gradeCandidate);
+  }, [estudianteSeleccionado, extractGradeNumber]);
+
+  const studentProfileReady = Boolean(
+    estudianteSeleccionado && estudianteNivelKey && estudianteGradoNumero != null
+  );
+
+  const requiereDatosAcademicos = Boolean(estudianteSeleccionado && !studentProfileReady);
+
+  const cursosCompatibles = useMemo(() => {
+    if (!estudianteSeleccionado) {
+      return cursosActivos;
+    }
+    if (!studentProfileReady) {
+      return [];
+    }
+    return cursosActivos.filter((curso) => {
+      const cursoNivelKey = canonicalizeLevel(curso.level);
+      if (!cursoNivelKey || cursoNivelKey !== estudianteNivelKey) {
+        return false;
+      }
+      const cursoGrado = extractGradeNumber(curso.grade_number);
+      return cursoGrado != null && cursoGrado === estudianteGradoNumero;
+    });
+  }, [
+    cursosActivos,
+    estudianteSeleccionado,
+    estudianteNivelKey,
+    estudianteGradoNumero,
+    canonicalizeLevel,
+    extractGradeNumber,
+    studentProfileReady,
+  ]);
+
+  const cursosAsignables = estudianteSeleccionado ? cursosCompatibles : cursosActivos;
+  const cursosCompatiblesCount = estudianteSeleccionado ? cursosCompatibles.length : cursosAsignables.length;
+
+  const asignacionSeleccionada = useMemo(() => {
+    if (!formData.asignacionId) return null;
+    return (
+      cursosAsignables.find((cp) => {
+        const resolvedId = resolveCursoId(cp);
+        return resolvedId !== null && String(resolvedId) === String(formData.asignacionId);
+      }) || null
+    );
+  }, [formData.asignacionId, cursosAsignables, resolveCursoId]);
+
+  // Cargar estudiantes del curso seleccionado para evitar duplicados
+  useEffect(() => {
+    if (!asignacionSeleccionada) {
+      setLoadingEstudiantesAsignacion(false);
+      return;
+    }
+    actualizarEstudiantesAsignacion(asignacionSeleccionada);
+  }, [asignacionSeleccionada, actualizarEstudiantesAsignacion]);
+
+  const aulaBloqueada = useMemo(() => {
+    if (!asignacionSeleccionada) return false;
+    const nivel = normalizeText(asignacionSeleccionada.level);
+    const grado = normalizeGrade(asignacionSeleccionada.grade_number);
+    const seccion = normalizeText(asignacionSeleccionada.section);
+    return Boolean(nivel && grado !== null && seccion);
+  }, [asignacionSeleccionada, normalizeGrade, normalizeText]);
+
+  const sinCursosCompatibles = Boolean(
+    estudianteSeleccionado && studentProfileReady && cursosCompatibles.length === 0
+  );
+
+  // Filtrar estudiantes según el curso seleccionado
+  const estudiantesFiltrados = useMemo(() => {
+    // Si no hay curso seleccionado, mostrar todos los estudiantes
+    if (!formData.asignacionId) {
+      return estudiantes;
+    }
+    // Mientras se cargan los estudiantes inscritos, no mostrar opciones para evitar duplicados temporales
+    if (loadingEstudiantesAsignacion) {
+      return [];
+    }
+
+    // Encontrar el curso seleccionado
+    const cursoSeleccionadoParaFiltrar = cursosAsignables.find((cp) => {
+      const resolvedId = resolveCursoId(cp);
+      return resolvedId !== null && String(resolvedId) === String(formData.asignacionId);
+    });
+
+    // Si no se encuentra el curso, mostrar todos los estudiantes
+    if (!cursoSeleccionadoParaFiltrar) {
+      return estudiantes;
+    }
+
+    // Obtener nivel y grado del curso seleccionado
+    const cursoNivelKey = canonicalizeLevel(cursoSeleccionadoParaFiltrar.level);
+    const cursoGrado = extractGradeNumber(cursoSeleccionadoParaFiltrar.grade_number);
+    const cursoId = resolveCursoId(cursoSeleccionadoParaFiltrar);
+
+    const asignadosSet = new Set(
+      (cursosConEstudiantes.find((c) => resolveCursoId(c) === cursoId)?.estudiantesAsignados || [])
+        .map((est) => resolveEstudianteId(est))
+        .filter((id) => id !== null && id !== undefined)
+        .map(String)
+    );
+    console.log('[AsignacionEstudiantes] Depuracion filtro', {
+      cursoId,
+      asignacionId: formData.asignacionId,
+      inscritosIds: Array.from(asignadosSet),
+      totalEstudiantes: estudiantes.length,
+    });
+
+    // Filtrar estudiantes que coincidan con el nivel y grado del curso
+    const cursoGradoNumber = Number.isFinite(Number(cursoGrado)) ? Number(cursoGrado) : cursoGrado;
+    const filtrados = estudiantes.filter((estudiante) => {
+      const estNivelCandidate =
+        estudiante.nivel_estudiante ??
+        estudiante.nivel ??
+        estudiante?.datos_estudiante?.nivel ??
+        null;
+      const estNivelKey = canonicalizeLevel(normalizeText(estNivelCandidate));
+
+      const estGradoCandidate =
+        estudiante.grado_estudiante ??
+        estudiante.grado ??
+        estudiante?.datos_estudiante?.grado ??
+        null;
+      const estGradoRaw = extractGradeNumber(estGradoCandidate);
+      const estGrado = Number.isFinite(Number(estGradoRaw)) ? Number(estGradoRaw) : estGradoRaw;
+      const estId = resolveEstudianteId(estudiante);
+      if (estId !== null && estId !== undefined && asignadosSet.has(String(estId))) {
+        console.log('[AsignacionEstudiantes] Excluido por ya inscrito', {
+          estId,
+          nombre: estudiante.nombre,
+          cursoId,
+        });
+      }
+
+      // Si falta info clave, no es un match válido
+      if (!cursoNivelKey || cursoGradoNumber == null || !estNivelKey || estGrado == null) {
+        return false;
+      }
+
+      // Solo mostrar estudiantes con el mismo nivel y grado del curso
+      if (estNivelKey !== cursoNivelKey || estGrado !== cursoGradoNumber) {
+        return false;
+      }
+
+      // Excluir estudiantes ya inscritos en este curso
+      if (estId !== null && estId !== undefined && asignadosSet.has(String(estId))) {
+        return false;
+      }
+
+      return true;
+    });
+
+    // Debug en consola para ayudar a detectar por qué no aparecen estudiantes
+    console.log('[AsignacionEstudiantes] Curso seleccionado:', {
+      asignacionId: formData.asignacionId,
+      nivel: cursoSeleccionadoParaFiltrar.level,
+      cursoNivelKey,
+      grado: cursoSeleccionadoParaFiltrar.grade_number,
+      cursoGrado: cursoGradoNumber,
+    });
+    console.log('[AsignacionEstudiantes] Estudiantes coincidentes:', filtrados.length, filtrados.map((e) => ({
+      id: resolveEstudianteId(e),
+      nombre: e.nombre,
+      nivel: e.nivel_estudiante ?? e.nivel ?? e?.datos_estudiante?.nivel ?? null,
+      nivelKey: canonicalizeLevel(normalizeText(e.nivel_estudiante ?? e.nivel ?? e?.datos_estudiante?.nivel ?? null)),
+      grado: e.grado_estudiante ?? e.grado ?? e?.datos_estudiante?.grado ?? null,
+      gradoNumber: extractGradeNumber(e.grado_estudiante ?? e.grado ?? e?.datos_estudiante?.grado ?? null),
+    })));
+    if (filtrados.length === 0) {
+      console.log('[AsignacionEstudiantes] Estudiantes disponibles (nivel/grado detectados):', estudiantes.map((e) => ({
+        id: resolveEstudianteId(e),
+        nombre: e.nombre,
+        nivel: e.nivel_estudiante ?? e.nivel ?? e?.datos_estudiante?.nivel ?? null,
+        grado: e.grado_estudiante ?? e.grado ?? e?.datos_estudiante?.grado ?? null,
+        nivelKey: canonicalizeLevel(normalizeText(e.nivel_estudiante ?? e.nivel ?? e?.datos_estudiante?.nivel ?? null)),
+        gradoNumber: extractGradeNumber(e.grado_estudiante ?? e.grado ?? e?.datos_estudiante?.grado ?? null),
+      })));
+    }
+
+    return filtrados;
+  }, [
+    formData.asignacionId,
+    estudiantes,
+    cursosAsignables,
+    resolveCursoId,
+    canonicalizeLevel,
+    normalizeText,
+    extractGradeNumber,
+    cursosConEstudiantes,
+    resolveEstudianteId,
+    loadingEstudiantesAsignacion,
+  ]);
 
   // Manejar cambios en el formulario
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === 'estudianteId') {
       setFormData((prev) => ({ ...prev, estudianteId: value }));
+      return;
     }
   };
 
@@ -184,20 +517,38 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
       const resolvedId = resolveEstudianteId(est);
       return resolvedId !== null && String(resolvedId) === String(formData.estudianteId);
     });
-    const curso = cursosProfesores.find((cp) => {
+    const curso = cursosAsignables.find((cp) => {
       const resolvedId = resolveCursoId(cp);
       return resolvedId !== null && String(resolvedId) === String(formData.asignacionId);
     });
 
-    if (!alumno || !curso) {
-      showError('Selecciona un estudiante y un curso válidos');
+    if (!alumno) {
+      showError('Selecciona un estudiante válido antes de continuar');
+      setLoading(false);
+      return;
+    }
+
+    if (requiereDatosAcademicos) {
+      showError('Completa el nivel y grado del estudiante antes de asignarlo a un curso');
+      setLoading(false);
+      return;
+    }
+
+    if (!curso) {
+      showError('Selecciona un curso compatible con el estudiante');
+      setLoading(false);
+      return;
+    }
+
+    if (isCursoPasado(curso)) {
+      showError('No puedes asignar estudiantes a clases que ya finalizaron');
       setLoading(false);
       return;
     }
     try {
       await axios.post(
-        `${apiBaseUrl}/asignaciones/${curso.id}/estudiantes`,
-  { estudianteId: resolveEstudianteId(alumno) },
+          `${apiBaseUrl}/asignaciones/${curso.id}/estudiantes`,
+          { estudianteId: resolveEstudianteId(alumno) },
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -205,6 +556,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
       showSuccess('Estudiante vinculado correctamente a la asignación');
       setFormData({ estudianteId: '', asignacionId: '' });
       setShowForm(false);
+      await actualizarEstudiantesAsignacion(curso);
       await fetchCursosProfesores();
     } catch (error) {
       const mensaje = error.response?.data?.error || error.response?.data?.message || 'Error al asignar estudiante';
@@ -234,11 +586,12 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
   const handleAsignacionChange = (e) => {
     const value = e.target.value;
     const trimmedValue = typeof value === 'string' ? value.trim() : value;
-    const selectedCurso = cursosProfesores.find((cp) => {
+    const selectedCurso = cursosAsignables.find((cp) => {
       const resolvedId = resolveCursoId(cp);
       return resolvedId !== null && String(resolvedId) === String(trimmedValue);
     });
-    setFormData((prev) => ({ ...prev, asignacionId: trimmedValue }));
+    setFormData((prev) => ({ ...prev, asignacionId: trimmedValue, estudianteId: '' }));
+    setCursoSeleccionado(selectedCurso || null);
     if (selectedCurso) {
       setFilters({
         nivel: normalizeText(selectedCurso.level) || '',
@@ -249,14 +602,35 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
   };
 
   // Mostrar detalles de un curso específico
-  const verDetallesCurso = (curso) => {
+  const verDetallesCurso = async (curso) => {
     setCursoSeleccionado(curso);
+    
+    // Cargar estudiantes del curso si no están cargados
+    const cursoId = curso.id || curso._id;
+    if (!expandedCursos.has(cursoId)) {
+      setExpandedCursos(prev => new Set([...prev, cursoId]));
+      
+      try {
+        const estudiantesCurso = await fetchEstudiantesCurso(cursoId);
+        setCursosConEstudiantes(prev => {
+          const index = prev.findIndex(c => (c.id || c._id) === cursoId);
+          if (index >= 0) {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], estudiantesAsignados: estudiantesCurso };
+            return updated;
+          }
+          return [...prev, { ...curso, estudiantesAsignados: estudiantesCurso }];
+        });
+      } catch (error) {
+        console.error('Error cargando estudiantes:', error);
+      }
+    }
   };
 
-  const nivelesDisponibles = Array.from(new Set(cursosProfesores.map((c) => c.level).filter(Boolean))).sort();
+  const nivelesDisponibles = Array.from(new Set(cursosAsignables.map((c) => c.level).filter(Boolean))).sort();
   const gradosDisponibles = Array.from(
     new Set(
-      cursosProfesores
+      cursosAsignables
         .filter((c) => !filters.nivel || c.level === filters.nivel)
         .map((c) => c.grade_number)
         .filter((grado) => {
@@ -277,7 +651,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
   });
   const seccionesDisponibles = Array.from(
     new Set(
-      cursosProfesores
+      cursosAsignables
         .filter((c) => (!filters.nivel || c.level === filters.nivel) && (!filters.grado || String(c.grade_number) === String(filters.grado)))
         .map((c) => c.section)
         .filter((seccion) => {
@@ -290,7 +664,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
 
   const searchQuery = searchTerm.trim().toLowerCase();
 
-  const filteredCursos = cursosProfesores.filter((curso) => {
+  const filteredCursos = cursosAsignables.filter((curso) => {
     if (filters.nivel && curso.level !== filters.nivel) return false;
     if (filters.grado && String(curso.grade_number) !== String(filters.grado)) return false;
     if (filters.seccion && curso.section !== filters.seccion) return false;
@@ -325,19 +699,20 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
     return true;
   });
 
-  const totalCursos = cursosProfesores.length;
-  const cursosDisponibles = cursosProfesores.filter((curso) => {
+  const totalCursos = cursosAsignables.length;
+  const cursosDisponibles = cursosAsignables.filter((curso) => {
     const inscritos = Number(curso.inscritos || 0);
     const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
     if (maxAlumnos === null || maxAlumnos <= 0) return true;
     return inscritos < maxAlumnos;
   }).length;
-  const cursosCompletos = cursosProfesores.filter((curso) => {
+  const cursosCompletos = cursosAsignables.filter((curso) => {
     const inscritos = Number(curso.inscritos || 0);
     const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
     if (maxAlumnos === null || maxAlumnos <= 0) return false;
     return inscritos >= maxAlumnos;
   }).length;
+  const cursosHistoricosTotal = cursosHistoricos.length;
   const cursoSeleccionadoDetalle = cursoSeleccionado
     ? {
         inscritos: Number(cursoSeleccionado.inscritos || 0),
@@ -636,6 +1011,108 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
         .animate-fade-scale {
           animation: fadeInScale 0.5s ease-out forwards;
         }
+        
+        /* Estilos para lista de estudiantes */
+        .students-list-container {
+          max-height: 350px;
+          overflow-y: auto;
+          padding-right: 8px;
+        }
+        
+        .students-list-container::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .students-list-container::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 10px;
+        }
+        
+        .students-list-container::-webkit-scrollbar-thumb {
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          border-radius: 10px;
+        }
+        
+        .students-list-container::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(135deg, #764ba2, #667eea);
+        }
+        
+        .student-item {
+          background: #f8f9fa;
+          border-radius: 12px;
+          padding: 12px;
+          margin-bottom: 10px;
+          transition: all 0.3s ease;
+          border: 1px solid transparent;
+        }
+        
+        .student-item:hover {
+          background: #e9ecef;
+          border-color: rgba(102, 126, 234, 0.3);
+          transform: translateX(5px);
+        }
+        
+        .student-avatar {
+          width: 42px;
+          height: 42px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 700;
+          font-size: 16px;
+          flex-shrink: 0;
+          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .student-info {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .student-name {
+          font-weight: 600;
+          color: #2d3748;
+          margin-bottom: 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .student-email {
+          font-size: 0.85rem;
+          color: #718096;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .student-badge {
+          padding: 4px 12px;
+          border-radius: 12px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        
+        .empty-students {
+          text-align: center;
+          padding: 3rem 1rem;
+          background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+          border-radius: 16px;
+          border: 2px dashed rgba(102, 126, 234, 0.2);
+        }
+        
+        .empty-students-icon {
+          font-size: 3rem;
+          opacity: 0.3;
+          margin-bottom: 1rem;
+          color: #667eea;
+        }
       `}</style>
 
       <div className="min-vh-100" style={{background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)'}}>
@@ -683,37 +1160,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                     
                     <form onSubmit={handleSubmit}>
                       <div className="row g-4">
-                        <div className="col-md-6">
-                          <div className="floating-label">
-                            <select
-                              id="estudianteId"
-                              name="estudianteId"
-                              className="floating-input"
-                              value={formData.estudianteId}
-                              onChange={handleChange}
-                              required
-                              placeholder=" "
-                            >
-                              <option value="">Seleccionar estudiante...</option>
-                              {estudiantes.map((estudiante) => {
-                                const resolvedId = resolveEstudianteId(estudiante);
-                                if (resolvedId === null || resolvedId === undefined) {
-                                  return null;
-                                }
-                                return (
-                                  <option key={resolvedId} value={resolvedId}>
-                                    {estudiante.nombre}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                            <label className="label-text">
-                              <FaUserGraduate className="me-2" />
-                              Estudiante
-                            </label>
-                          </div>
-                        </div>
-                        
+                        {/* Primero seleccionar el curso */}
                         <div className="col-md-6">
                           <div className="floating-label">
                             <select
@@ -749,18 +1196,100 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                               })}
                             </select>
                             <label className="label-text">
-                              <FaChalkboardTeacher className="me-2" />
-                              Curso y Profesor
+                              <FaBook className="me-2" />
+                              Curso / Clase
                             </label>
                           </div>
                         </div>
-                        {aulaBloqueada && asignacionSeleccionada && (
-                          <div className="col-12">
-                            <div className="alert alert-info rounded-4 py-3 px-4 mb-0">
-                              <strong>Aula definida:</strong> {buildUbicacionResumen(asignacionSeleccionada)}. Para cambiar estos datos selecciona otra asignación.
-                            </div>
+
+                        {/* Luego seleccionar el estudiante filtrado por el curso */}
+                        <div className="col-md-6">
+                          <div className="floating-label">
+                            <select
+                              id="estudianteId"
+                              name="estudianteId"
+                              className="floating-input"
+                              value={formData.estudianteId}
+                              onChange={handleChange}
+                              required
+                              disabled={!formData.asignacionId || loadingEstudiantesAsignacion}
+                              placeholder=" "
+                            >
+                              <option value="">
+                                {!formData.asignacionId 
+                                  ? 'Primero selecciona un curso...'
+                                  : loadingEstudiantesAsignacion
+                                    ? 'Cargando estudiantes...'
+                                    : estudiantesFiltrados.length === 0
+                                      ? 'No hay estudiantes para este nivel/grado'
+                                      : 'Seleccionar estudiante...'}
+                              </option>
+                              {estudiantesFiltrados.map((estudiante) => {
+                                const resolvedId = resolveEstudianteId(estudiante);
+                                if (resolvedId === null || resolvedId === undefined) {
+                                  return null;
+                                }
+                                return (
+                                  <option key={resolvedId} value={resolvedId}>
+                                    {estudiante.nombre}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <label className="label-text">
+                              <FaUserGraduate className="me-2" />
+                              Estudiante
+                            </label>
                           </div>
-                        )}
+                        </div>
+                      </div>
+
+                      {/* Alertas informativas */}
+                      {formData.asignacionId && estudiantesFiltrados.length === 0 && (
+                        <div className="alert alert-warning rounded-4 py-3 px-4 mt-3 d-flex align-items-center gap-3">
+                          <FaExclamationTriangle className="text-warning" />
+                          <div>
+                            No hay estudiantes registrados con el nivel y grado de este curso. Verifica los datos académicos de los estudiantes.
+                          </div>
+                        </div>
+                      )}
+
+                      {estudianteSeleccionado && (
+                        <div className="col-12 mt-3">
+                          {requiereDatosAcademicos ? (
+                            <div className="alert alert-warning rounded-4 py-3 px-4 mb-0 d-flex align-items-center gap-3">
+                              <FaExclamationTriangle className="text-warning" />
+                              <div>
+                                <strong>{estudianteSeleccionado.nombre}</strong> no tiene registrado su nivel y grado académico. Completa sus datos desde "Usuarios" → "Datos del estudiante" antes de asignarlo.
+                              </div>
+                            </div>
+                          ) : sinCursosCompatibles ? (
+                            <div className="alert alert-danger rounded-4 py-3 px-4 mb-0 d-flex align-items-center gap-3">
+                              <FaTimes className="text-danger" />
+                              <div>
+                                No hay cursos activos para {estudianteNivel || 'Nivel no definido'} • Grado {estudianteGradoNumero ?? 'N/A'}. Revisa que exista una clase para ese nivel/grado o crea una nueva asignación.
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="alert alert-success rounded-4 py-3 px-4 mb-0 d-flex align-items-center gap-3">
+                              <FaCheckCircle className="text-success" />
+                              <div>
+                                Perfil académico: <strong>{estudianteNivel || 'Nivel no definido'}</strong> • <strong>Grado {estudianteGradoNumero ?? 'N/A'}</strong>. Cursos compatibles disponibles: <strong>{cursosCompatiblesCount}</strong>.
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {aulaBloqueada && asignacionSeleccionada && (
+                        <div className="col-12 mt-3">
+                          <div className="alert alert-info rounded-4 py-3 px-4 mb-0">
+                            <strong>Aula definida:</strong> {buildUbicacionResumen(asignacionSeleccionada)}. Para cambiar estos datos selecciona otra asignación.
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="row g-4 mt-3">
                         <div className="col-md-4">
                           <div className="floating-label">
                             <select
@@ -903,6 +1432,28 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
 
               {/* Grid de cursos */}
               <div className="row g-4">
+                {filteredCursos.length === 0 && (
+                  <div className="col-12">
+                    <div className="neo-card text-center py-5">
+                      {requiereDatosAcademicos ? (
+                        <>
+                          <FaExclamationTriangle className="text-warning mb-3" size={32} />
+                          <p className="mb-0">Completa el nivel y grado del estudiante para ver cursos compatibles.</p>
+                        </>
+                      ) : estudianteSeleccionado ? (
+                        <>
+                          <FaTimes className="text-danger mb-3" size={32} />
+                          <p className="mb-0">No hay cursos compatibles con el perfil seleccionado. Crea una nueva clase o ajusta los filtros.</p>
+                        </>
+                      ) : (
+                        <>
+                          <FaSearch className="text-muted mb-3" size={32} />
+                          <p className="mb-0">No se encontraron cursos con los filtros aplicados.</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {filteredCursos.map((curso, index) => {
                   const inscritos = Number(curso.inscritos || 0);
                   const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
@@ -980,6 +1531,11 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                   </div>
                   <h5 className="text-muted">No se encontraron cursos</h5>
                   <p className="text-muted">Intenta ajustar tus filtros de búsqueda</p>
+                  {cursosHistoricosTotal > 0 && (
+                    <p className="text-muted small mb-0">
+                      {cursosHistoricosTotal} clases finalizaron y ahora viven en el panel "Clases Pasadas".
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -996,7 +1552,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                   <div className="row g-3 text-center">
                     <div className="col-6">
                       <div className="h3 fw-bold mb-1">{totalCursos}</div>
-                      <div className="small opacity-75">Cursos Totales</div>
+                      <div className="small opacity-75">Cursos Activos</div>
                     </div>
                     <div className="col-6">
                       <div className="h3 fw-bold mb-1">{estudiantes.length}</div>
@@ -1010,6 +1566,10 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                       <div className="h3 fw-bold mb-1">{cursosCompletos}</div>
                       <div className="small opacity-75">Completos</div>
                     </div>
+                    <div className="col-6">
+                      <div className="h3 fw-bold mb-1">{cursosHistoricosTotal}</div>
+                      <div className="small opacity-75">Clases Pasadas</div>
+                    </div>
                   </div>
                 </div>
 
@@ -1021,7 +1581,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                   </h6>
                   
                   <div className="space-y-3">
-                    {(Array.isArray(cursosProfesores) ? cursosProfesores : []).slice(0, 5).map((curso, index) => {
+                    {(Array.isArray(cursosAsignables) ? cursosAsignables : []).slice(0, 5).map((curso, index) => {
                       const inscritos = Number(curso.inscritos || 0);
                       const maxAlumnos = curso.max_alumnos != null ? Number(curso.max_alumnos) : null;
                       const tieneCupoDefinido = maxAlumnos !== null && maxAlumnos > 0;
@@ -1106,7 +1666,7 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                           <div className="bg-success bg-opacity-10 rounded-circle p-3 me-3">
                             <FaUsers className="text-success" />
                           </div>
-                          <div>
+                          <div className="flex-grow-1">
                             <h6 className="mb-1 fw-bold">Capacidad</h6>
                             <p className="mb-0">
                               <span className="fw-bold text-primary">
@@ -1119,6 +1679,62 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
                               )}
                             </p>
                           </div>
+                        </div>
+                        
+                        {/* Lista de Estudiantes Asignados */}
+                        <div className="mt-4">
+                          <h6 className="fw-bold mb-3 d-flex align-items-center">
+                            <FaUserGraduate className="me-2 text-primary" />
+                            Estudiantes Asignados
+                            <span className="badge bg-primary ms-2">
+                              {(() => {
+                                const cursoConEstudiantes = cursosConEstudiantes.find(c => c.id === cursoSeleccionado.id);
+                                return cursoConEstudiantes?.estudiantesAsignados?.length || 0;
+                              })()}
+                            </span>
+                          </h6>
+                          {(() => {
+                            const cursoConEstudiantes = cursosConEstudiantes.find(c => c.id === cursoSeleccionado.id);
+                            const estudiantesAsignados = cursoConEstudiantes?.estudiantesAsignados || [];
+                            
+                            if (estudiantesAsignados.length === 0) {
+                              return (
+                                <div className="empty-students">
+                                  <FaUsers className="empty-students-icon" />
+                                  <p className="text-muted fw-medium mb-0">No hay estudiantes asignados aún</p>
+                                  <p className="text-muted small mt-1">Usa el formulario para asignar estudiantes a este curso</p>
+                                </div>
+                              );
+                            }
+                            
+                            return (
+                              <div className="students-list-container">
+                                {estudiantesAsignados.map((estudiante, idx) => (
+                                  <div key={idx} className="student-item">
+                                    <div className="d-flex align-items-center gap-3">
+                                      <div className="student-avatar">
+                                        {(estudiante.nombre || estudiante.nombres || 'E')[0].toUpperCase()}
+                                      </div>
+                                      <div className="student-info">
+                                        <div className="student-name">
+                                          {estudiante.nombre || estudiante.nombres || 'Sin nombre'} {estudiante.apellido || estudiante.apellidos || ''}
+                                        </div>
+                                        {estudiante.email && (
+                                          <div className="student-email">{estudiante.email}</div>
+                                        )}
+                                      </div>
+                                      <div>
+                                        <span className="student-badge" style={{background: '#d4edda', color: '#155724'}}>
+                                          <FaCheckCircle />
+                                          Activo
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -1171,33 +1787,6 @@ const AsignacionEstudiantes = ({ usuarios, token, showError, showSuccess }) => {
             </div>
           </div>
         )}
-
-        {/* Nueva sección: Estudiantes y Ciclo Asignado */}
-        <div className="neo-card p-4 mb-4 animate-slide-up">
-          <h5 className="fw-bold mb-3" style={{color: '#2d3748'}}>
-            <FaUserGraduate className="me-2" /> Estudiantes y Ciclo Asignado
-          </h5>
-          <div className="table-responsive">
-            <table className="table table-bordered table-hover align-middle">
-              <thead className="table-light">
-                <tr>
-                  <th>Nombre</th>
-                  <th>Email</th>
-                  <th>Ciclo/Semestre</th>
-                </tr>
-              </thead>
-              <tbody>
-                {estudiantes.map(est => (
-                  <tr key={est._id}>
-                    <td>{est.nombre}</td>
-                    <td>{est.email}</td>
-                    <td>{est.ciclo_nombre || 'No asignado'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </>
   );

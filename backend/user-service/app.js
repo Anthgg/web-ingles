@@ -45,7 +45,11 @@ const isBadFieldError = (error) =>
   error?.errno === 1054 ||
   error?.details?.driverCode === 'ER_BAD_FIELD_ERROR' ||
   error?.details?.driverCode === 1054 ||
-  error?.details?.code === 'DB_ERROR';
+  error?.details?.code === 'DB_ERROR' ||
+  (typeof error?.message === 'string' &&
+    (error.message.includes('ER_BAD_FIELD_ERROR') ||
+      error.message.includes('Unknown column') ||
+      error.message.includes('Error en la base de datos')));
 
 // ER_NO_SUCH_TABLE (1146) indica que la tabla referenciada no existe
 const isMissingTableError = (error) =>
@@ -53,6 +57,19 @@ const isMissingTableError = (error) =>
   error?.errno === 1146 ||
   error?.details?.driverCode === 'ER_NO_SUCH_TABLE' ||
   error?.details?.driverCode === 1146;
+
+const DOCENTE_ALLOWED_FIELDS = new Set([
+  'carga_horaria_semanal',
+  'titulo_profesional',
+  'universidad_egreso',
+  'numero_colegiatura',
+  'areas_investigacion',
+  'publicaciones',
+  'idiomas_domina',
+  'nivel_ingles',
+  'disponibilidad_horaria',
+  'observaciones',
+]);
 
 // Schema para login
 const loginSchema = z.object({
@@ -69,11 +86,59 @@ app.use(
 app.use(express.json());
 app.use(httpLogger({ logger }));
 
+// Ejecutar backfill de códigos una vez al iniciar el servicio (no bloqueante)
+setTimeout(() => {
+  backfillCodigosUsuarios().catch((err) =>
+    logger.warn({ err }, 'Fallo backfill inicial de códigos'),
+  );
+}, 500);
+
 
 let cachedJwtSecret;
 const resolveJwtSecret = () => {
   // Aquí va la lógica para obtener el secreto JWT si es necesario
   return cachedJwtSecret || env.USER_SECRET_KEY || env.JWT_SECRET || '';
+};
+
+// Backfill de códigos para usuarios existentes
+const backfillCodigosUsuarios = async () => {
+  try {
+    const resEst = await db.query(
+      `UPDATE usuarios
+         SET codigo_estudiante = CONCAT('EST-', LPAD(id, 6, '0'))
+       WHERE (rol IN ('estudiante', 'alumno'))
+         AND (codigo_estudiante IS NULL OR codigo_estudiante = '')`,
+      [],
+      { tag: 'user.backfill.codigo_estudiante' },
+    );
+    const resDoc = await db.query(
+      `UPDATE usuarios
+         SET codigo_docente = CONCAT('DOC-', LPAD(id, 6, '0'))
+       WHERE (rol IN ('profesor', 'docente'))
+         AND (codigo_docente IS NULL OR codigo_docente = '')`,
+      [],
+      { tag: 'user.backfill.codigo_docente' },
+    );
+    const resAdm = await db.query(
+      `UPDATE usuarios
+         SET codigo_admin = CONCAT('ADM-', LPAD(id, 6, '0'))
+       WHERE (rol IN ('admin', 'administrativo'))
+         AND (codigo_admin IS NULL OR codigo_admin = '')`,
+      [],
+      { tag: 'user.backfill.codigo_admin' },
+    );
+
+    logger.info(
+      {
+        estudiantes: resEst?.affectedRows ?? 0,
+        docentes: resDoc?.affectedRows ?? 0,
+        admins: resAdm?.affectedRows ?? 0,
+      },
+      'Backfill de códigos de usuario completado',
+    );
+  } catch (error) {
+    logger.warn({ err: error }, 'No se pudieron rellenar códigos faltantes (¿faltan columnas?)');
+  }
 };
 
 
@@ -84,11 +149,46 @@ const createUserSchema = z.object({
   password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres'),
 });
 
-const updateUserSchema = z.object({
-  nombre: z.string().min(1, 'Nombre requerido'),
-  rol: z.string().min(1, 'Rol requerido'),
-  password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional(),
-});
+const updateUserSchema = z
+  .object({
+    nombre: z.string().min(1, 'Nombre requerido').optional(),
+    rol: z.string().min(1, 'Rol requerido').optional(),
+    email: z.string().email('Email inválido').optional(),
+    password: z.preprocess(
+      (val) => {
+        if (typeof val !== 'string') return val;
+        const trimmed = val.trim();
+        // Algunos navegadores rellenan inputs password con puntos/bullets (••••) solo visuales; los ignoramos
+        const maskedLike = /^[.•*]+$/;
+        if (trimmed === '' || maskedLike.test(trimmed)) return undefined;
+        return trimmed;
+      },
+      z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional(),
+    ),
+    activo: z.coerce.boolean().optional(),
+    estudiante: z.any().optional(),
+    datos_estudiante: z.any().optional(),
+    nivel: z.string().optional(),
+    grado: z.string().optional(),
+    seccion: z.string().optional(),
+    matricula: z.string().optional(),
+  })
+  .passthrough()
+  .refine(
+    (data) =>
+      data.nombre !== undefined ||
+      data.rol !== undefined ||
+      data.email !== undefined ||
+      data.password !== undefined ||
+      data.activo !== undefined ||
+      data.estudiante !== undefined ||
+      data.datos_estudiante !== undefined ||
+      data.nivel !== undefined ||
+      data.grado !== undefined ||
+      data.seccion !== undefined ||
+      data.matricula !== undefined,
+    { message: 'Sin campos para actualizar' },
+  );
 
 const userIdSchema = z.object({
   id: z.coerce.number().int().positive('Id invÃƒÂ¡lido'),
@@ -127,7 +227,17 @@ const ensureAdmin = rbac(['administrativo', 'admin'], { jwtSecret: SECRET_KEY })
 const isAdmin = (user) => (user?.rol === 'administrativo' || user?.rol === 'admin');
 const validateUserParams = validator(userIdSchema, { target: 'params' });
 const validateCreateUser = validator(createUserSchema);
-const validateUpdateUser = validator(updateUserSchema);
+const validateUpdateUser = validator(updateUserSchema, {
+  onError: ({ issues }, req, res) => {
+    logger.warn({ requestId: req.id, issues }, 'Validacion de update usuario fallo');
+    return res.status(400).json({
+      status: 400,
+      message: 'Validation failed',
+      requestId: req.id,
+      details: issues,
+    });
+  },
+});
 const validatePersonalData = validator(personalDataSchema);
 const validateDesactivar = validator(desactivarUsuarioSchema);
 const validateActualizarPermiso = validator(actualizarPermisoSchema);
@@ -158,60 +268,117 @@ app.post('/login', validator(loginSchema), asyncHandler(async (req, res) => {
 const listUsersHandler = asyncHandler(async (req, res) => {
   const fullQuery = `
     SELECT 
-      id,
-      nombre,
-      nombres,
-      apellido_paterno,
-      apellido_materno,
-      CONCAT_WS(' ', nombres, apellido_paterno, apellido_materno) AS nombre_completo,
-      email,
-      rol,
-      codigo_estudiante,
-      codigo_docente,
-      codigo_admin,
-      documento_identidad,
-      tipo_documento,
-      telefono,
-      direccion,
-      departamento,
-      provincia,
-      distrito,
+      u.id,
+      u.nombre,
+      u.nombres,
+      u.apellido_paterno,
+      u.apellido_materno,
+      CONCAT_WS(' ', u.nombres, u.apellido_paterno, u.apellido_materno) AS nombre_completo,
+      u.email,
+      u.rol,
+      u.codigo_estudiante,
+      u.codigo_docente,
+      u.codigo_admin,
+      ed.matricula AS matricula_estudiante,
+      u.documento_identidad,
+      u.tipo_documento,
+      u.telefono,
+      u.direccion,
+      u.departamento,
+      u.provincia,
+      u.distrito,
       CASE 
-        WHEN foto_perfil_imagen IS NOT NULL 
-          OR (foto_perfil IS NOT NULL AND foto_perfil <> '') 
+        WHEN u.foto_perfil_imagen IS NOT NULL 
+          OR (u.foto_perfil IS NOT NULL AND u.foto_perfil <> '') 
         THEN 1 ELSE 0 
       END AS tiene_foto_perfil,
-      activo,
-      created_at
-    FROM usuarios`;
+      u.activo,
+      u.created_at,
+      ed.nivel AS nivel_estudiante,
+      ed.grado AS grado_estudiante,
+      ed.seccion AS seccion_estudiante
+    FROM usuarios u
+    LEFT JOIN estudiante_datos ed ON ed.usuario_id = u.id`;
 
   const fallbackQuery = 'SELECT * FROM usuarios';
 
+  const fetchStudentDataMap = async (ids = []) => {
+    if (!Array.isArray(ids) || ids.length === 0) return new Map();
+    const placeholders = ids.map(() => '?').join(',');
+    try {
+      const rows = await db.query(
+        `SELECT usuario_id, nivel, grado, seccion, matricula 
+           FROM estudiante_datos 
+          WHERE usuario_id IN (${placeholders})`,
+        ids,
+        { tag: 'user.listAll.estudianteDatos' },
+      );
+      const map = new Map();
+      rows.forEach((r) => {
+        map.set(Number(r.usuario_id), {
+          nivel: r.nivel ?? null,
+          grado: r.grado ?? null,
+          seccion: r.seccion ?? null,
+          matricula: r.matricula ?? null,
+        });
+      });
+      return map;
+    } catch (error) {
+      logger.warn({ err: error }, 'No se pudo cargar estudiante_datos para la lista de usuarios');
+      return new Map();
+    }
+  };
+
   try {
     const users = await db.query(fullQuery, [], { tag: 'user.listAll' });
-    return res.json(users);
+    const ids = users.map((u) => u.id).filter(Boolean);
+    const studentMap = await fetchStudentDataMap(ids);
+    const enriched = users.map((u) => {
+      const est = studentMap.get(Number(u.id)) || {};
+      return {
+        ...u,
+        nivel_estudiante: u.nivel_estudiante ?? est.nivel ?? null,
+        grado_estudiante: u.grado_estudiante ?? est.grado ?? null,
+        seccion_estudiante: u.seccion_estudiante ?? est.seccion ?? null,
+        matricula: u.matricula_estudiante ?? est.matricula ?? null,
+      };
+    });
+    return res.json(enriched);
   } catch (error) {
     if (!isBadFieldError(error)) {
       throw error;
     }
     logger.warn({ err: error }, 'Campos faltantes en usuarios, usando esquema basico');
     const users = await db.query(fallbackQuery, [], { tag: 'user.listAll.basic' });
-    const normalized = users.map((u) => ({
-      ...u,
-      nombres: u.nombres ?? null,
-      apellido_paterno: u.apellido_paterno ?? null,
-      apellido_materno: u.apellido_materno ?? null,
-      nombre_completo: u.nombre_completo ?? u.nombre,
-      codigo_estudiante: u.codigo_estudiante ?? null,
-      codigo_docente: u.codigo_docente ?? null,
-      codigo_admin: u.codigo_admin ?? null,
+    const ids = users.map((u) => u.id).filter(Boolean);
+    const studentMap = await fetchStudentDataMap(ids);
+    const normalized = users.map((u) => {
+      const est = studentMap.get(Number(u.id)) || {};
+      return {
+        ...u,
+        nombres: u.nombres ?? null,
+        apellido_paterno: u.apellido_paterno ?? null,
+        apellido_materno: u.apellido_materno ?? null,
+        nombre_completo: u.nombre_completo ?? u.nombre,
+        codigo_estudiante: u.codigo_estudiante ?? null,
+        codigo_docente: u.codigo_docente ?? null,
+        codigo_admin: u.codigo_admin ?? null,
+        matricula: u.matricula ?? est.matricula ?? null,
 
-      direccion: u.direccion ?? null,
-      departamento: u.departamento ?? null,
-      provincia: u.provincia ?? null,
-      distrito: u.distrito ?? null,
-      tiene_foto_perfil: u.tiene_foto_perfil ?? 0,
-    }));
+        direccion: u.direccion ?? null,
+        departamento: u.departamento ?? null,
+        provincia: u.provincia ?? null,
+        distrito: u.distrito ?? null,
+        tiene_foto_perfil:
+          u.tiene_foto_perfil ||
+          (u.foto_perfil_imagen ? 1 : 0) ||
+          (u.foto_perfil ? 1 : 0) ||
+          0,
+        nivel_estudiante: u.nivel_estudiante ?? u.nivel ?? est.nivel ?? null,
+        grado_estudiante: u.grado_estudiante ?? u.grado ?? est.grado ?? null,
+        seccion_estudiante: u.seccion_estudiante ?? u.seccion ?? est.seccion ?? null,
+      };
+    });
     return res.json(normalized);
   }
 });
@@ -247,19 +414,27 @@ const listUsersIncompletosHandler = asyncHandler(async (req, res) => {
         THEN 1 ELSE 0 
       END AS tiene_foto_perfil,
       CASE 
-        WHEN (u.nombres IS NOT NULL AND u.nombres != '' AND
-              u.apellido_paterno IS NOT NULL AND u.apellido_paterno != '' AND
-              u.apellido_materno IS NOT NULL AND u.apellido_materno != '' AND
-              u.documento_identidad IS NOT NULL AND u.documento_identidad != '')
+        WHEN COALESCE(NULLIF(u.nombres, ''), NULLIF(u.nombre, '')) IS NOT NULL
+          AND NULLIF(u.apellido_paterno, '') IS NOT NULL
+          AND NULLIF(u.apellido_materno, '') IS NOT NULL
+          AND NULLIF(u.documento_identidad, '') IS NOT NULL
+          AND NULLIF(u.telefono, '') IS NOT NULL
+          AND NULLIF(u.direccion, '') IS NOT NULL
+          AND NULLIF(u.departamento, '') IS NOT NULL
+          AND NULLIF(u.provincia, '') IS NOT NULL
+          AND NULLIF(u.distrito, '') IS NOT NULL
         THEN 1 ELSE 0
       END AS datos_completos,
       CONCAT_WS(', ',
-        IF(u.nombres IS NULL OR u.nombres = '', 'Nombres', NULL),
+        IF(COALESCE(u.nombres, u.nombre) IS NULL OR COALESCE(u.nombres, u.nombre) = '', 'Nombres', NULL),
         IF(u.apellido_paterno IS NULL OR u.apellido_paterno = '', 'Apellido paterno', NULL),
         IF(u.apellido_materno IS NULL OR u.apellido_materno = '', 'Apellido materno', NULL),
         IF(u.documento_identidad IS NULL OR u.documento_identidad = '', 'Documento', NULL),
-        IF(u.telefono IS NULL OR u.telefono = '', 'Teléfono', NULL),
-        IF(u.direccion IS NULL OR u.direccion = '', 'Dirección', NULL)
+        IF(u.telefono IS NULL OR u.telefono = '', 'Telefono', NULL),
+        IF(u.direccion IS NULL OR u.direccion = '', 'Direccion', NULL),
+        IF(u.departamento IS NULL OR u.departamento = '', 'Departamento', NULL),
+        IF(u.provincia IS NULL OR u.provincia = '', 'Provincia', NULL),
+        IF(u.distrito IS NULL OR u.distrito = '', 'Distrito', NULL)
       ) AS campos_faltantes
     FROM usuarios u
     ORDER BY 
@@ -276,26 +451,65 @@ const listUsersIncompletosHandler = asyncHandler(async (req, res) => {
       console.warn('Campos faltantes en usuarios (incompletos), usando esquema basico');
       const fallbackQuery = 'SELECT * FROM usuarios';
       const users = await db.query(fallbackQuery, [], { tag: 'user.listAll.basic' });
-      const normalized = users.map((u) => ({
-        ...u,
-        nombres: u.nombres ?? u.nombre ?? null,
-        apellido_paterno: u.apellido_paterno ?? null,
-        apellido_materno: u.apellido_materno ?? null,
-        nombre_completo: u.nombre_completo ?? u.nombre,
-        codigo_estudiante: u.codigo_estudiante ?? null,
-        codigo_docente: u.codigo_docente ?? null,
-        codigo_admin: u.codigo_admin ?? null,
-        direccion: u.direccion ?? u.direccion_alt ?? null,
-        departamento: u.departamento ?? null,
-        provincia: u.provincia ?? null,
-        distrito: u.distrito ?? null,
-        telefono: u.telefono ?? u.telefono_alt ?? null,
-        documento_identidad: u.documento_identidad ?? u.dni_alt ?? null,
-        tiene_foto_perfil: u.tiene_foto_perfil ?? 0,
-        datos_completos: 0,
-        campos_faltantes: 'Requiere actualización de datos'
-      }));
-      return res.json(normalized);
+      const normalized = users.map((u) => {
+        const nombres = u.nombres ?? u.nombre ?? null;
+        const apellido_paterno = u.apellido_paterno ?? null;
+        const apellido_materno = u.apellido_materno ?? null;
+        const documento_identidad = u.documento_identidad ?? u.dni_alt ?? null;
+        const telefono = u.telefono ?? u.telefono_alt ?? null;
+        const direccion = u.direccion ?? u.direccion_alt ?? null;
+        const departamento = u.departamento ?? null;
+        const provincia = u.provincia ?? null;
+        const distrito = u.distrito ?? null;
+
+        const datos_completos =
+          !!(nombres &&
+             apellido_paterno &&
+             apellido_materno &&
+             documento_identidad &&
+             telefono &&
+             direccion &&
+             departamento &&
+             provincia &&
+             distrito);
+
+        const faltantes = [
+          nombres ? null : 'Nombres',
+          apellido_paterno ? null : 'Apellido paterno',
+          apellido_materno ? null : 'Apellido materno',
+          documento_identidad ? null : 'Documento',
+          telefono ? null : 'Telefono',
+          direccion ? null : 'Direccion',
+          departamento ? null : 'Departamento',
+          provincia ? null : 'Provincia',
+          distrito ? null : 'Distrito',
+        ].filter(Boolean).join(', ');
+
+        return {
+          ...u,
+          nombres,
+          apellido_paterno,
+          apellido_materno,
+          nombre_completo: u.nombre_completo ?? u.nombre,
+          codigo_estudiante: u.codigo_estudiante ?? null,
+          codigo_docente: u.codigo_docente ?? null,
+          codigo_admin: u.codigo_admin ?? null,
+          direccion,
+          departamento,
+          provincia,
+        distrito,
+        telefono,
+        documento_identidad,
+        tiene_foto_perfil:
+          u.tiene_foto_perfil ||
+          (u.foto_perfil_imagen ? 1 : 0) ||
+          (u.foto_perfil ? 1 : 0) ||
+          0,
+        datos_completos: datos_completos ? 1 : 0,
+        campos_faltantes: faltantes
+      };
+    });
+    return res.json(normalized);
     }
     logger.error({ error: error.message }, 'Error al obtener usuarios');
     res.json([]);
@@ -333,10 +547,15 @@ const listUsersCompletosHandler = asyncHandler(async (req, res) => {
       END AS tiene_foto_perfil
     FROM usuarios u
     WHERE 
-      u.nombres IS NOT NULL AND u.nombres != '' AND
-      u.apellido_paterno IS NOT NULL AND u.apellido_paterno != '' AND
-      u.apellido_materno IS NOT NULL AND u.apellido_materno != '' AND
-      u.documento_identidad IS NOT NULL AND u.documento_identidad != ''
+      COALESCE(NULLIF(u.nombres, ''), NULLIF(u.nombre, '')) IS NOT NULL AND
+      NULLIF(u.apellido_paterno, '') IS NOT NULL AND
+      NULLIF(u.apellido_materno, '') IS NOT NULL AND
+      NULLIF(u.documento_identidad, '') IS NOT NULL AND
+      NULLIF(u.telefono, '') IS NOT NULL AND
+      NULLIF(u.direccion, '') IS NOT NULL AND
+      NULLIF(u.departamento, '') IS NOT NULL AND
+      NULLIF(u.provincia, '') IS NOT NULL AND
+      NULLIF(u.distrito, '') IS NOT NULL
     ORDER BY 
       u.rol,
       u.id
@@ -768,7 +987,21 @@ app.get('/api/users/:id/report.pdf', ensureAdmin, asyncHandler(async (req, res) 
 
 const createUserHandler = asyncHandler(async (req, res) => {
   const { nombre, email, password, rol } = req.body;
+  const estudiantePayload = req.body.estudiante || req.body.datos_estudiante || {};
   const hash = await bcrypt.hash(password, 10);
+
+  const generateCodigo = (prefix, id) => `${prefix}-${String(id).padStart(6, '0')}`;
+  let codigoEstudiante = null;
+  let codigoDocente = null;
+  let codigoAdmin = null;
+
+  console.log('[createUserHandler] Intentando crear usuario', {
+    nombre,
+    email,
+    rol,
+    requestId: req.id || null,
+    ip: req.ip,
+  });
 
   try {
     const result = await db.query(
@@ -776,11 +1009,97 @@ const createUserHandler = asyncHandler(async (req, res) => {
       [nombre, email, hash, rol],
       { tag: 'user.create.insert' },
     );
+
+    // Generar códigos automáticos según rol
+    const codigoUpdates = [];
+    const codigoValues = [];
+    if (rol === 'estudiante') {
+      codigoUpdates.push('codigo_estudiante = ?');
+      codigoEstudiante = generateCodigo('EST', result.insertId);
+      codigoValues.push(codigoEstudiante);
+    } else if (rol === 'profesor' || rol === 'docente') {
+      codigoUpdates.push('codigo_docente = ?');
+      codigoDocente = generateCodigo('DOC', result.insertId);
+      codigoValues.push(codigoDocente);
+    } else if (rol === 'admin' || rol === 'administrativo') {
+      codigoUpdates.push('codigo_admin = ?');
+      codigoAdmin = generateCodigo('ADM', result.insertId);
+      codigoValues.push(codigoAdmin);
+    }
+
+    if (codigoUpdates.length) {
+      codigoValues.push(result.insertId);
+      try {
+        await db.query(
+          `UPDATE usuarios SET ${codigoUpdates.join(', ')} WHERE id = ?`,
+          codigoValues,
+          { tag: 'user.create.assignCodes' },
+        );
+        console.log('[createUserHandler] Códigos generados', {
+          userId: result.insertId,
+          codigoUpdates,
+        });
+      } catch (err) {
+        codigoEstudiante = rol === 'estudiante' ? null : codigoEstudiante;
+        codigoDocente = rol === 'profesor' || rol === 'docente' ? null : codigoDocente;
+        codigoAdmin = rol === 'admin' || rol === 'administrativo' ? null : codigoAdmin;
+        logger.warn({ err, userId: result.insertId }, 'No se pudo asignar códigos (¿faltan columnas?)');
+      }
+    }
+
+    // Si es estudiante y vienen datos acad�micos, persistirlos
+    if (rol === 'estudiante') {
+      const nivel =
+        estudiantePayload.nivel_estudiante ??
+        estudiantePayload.nivel ??
+        req.body.nivel_estudiante ??
+        req.body.nivel ??
+        null;
+      const grado =
+        estudiantePayload.grado_estudiante ??
+        estudiantePayload.grado ??
+        req.body.grado_estudiante ??
+        req.body.grado ??
+        null;
+      const seccion =
+        estudiantePayload.seccion_estudiante ??
+        estudiantePayload.seccion ??
+        req.body.seccion_estudiante ??
+        req.body.seccion ??
+        null;
+      const matricula = estudiantePayload.matricula ?? req.body.matricula ?? null;
+
+      const hasAcademic = nivel || grado || seccion || matricula;
+      if (hasAcademic) {
+        await db.query(
+          `INSERT INTO estudiante_datos (usuario_id, nivel, grado, seccion, matricula)
+           VALUES (?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             nivel = VALUES(nivel),
+             grado = VALUES(grado),
+             seccion = VALUES(seccion),
+             matricula = VALUES(matricula)`,
+          [result.insertId, nivel || null, grado || null, seccion || null, matricula || null],
+          { tag: 'user.create.estudiante_datos' },
+        );
+        console.log('[createUserHandler] Datos acad�micos guardados para estudiante', {
+          userId: result.insertId,
+          nivel,
+          grado,
+          seccion,
+          matricula,
+        });
+      }
+    }
+
     res.status(201).json({
       id: result.insertId,
       nombre,
       email,
       rol,
+      codigo_estudiante: codigoEstudiante,
+      codigo_docente: codigoDocente,
+      codigo_admin: codigoAdmin,
       created_at: new Date(),
     });
   } catch (error) {
@@ -791,26 +1110,135 @@ const createUserHandler = asyncHandler(async (req, res) => {
   }
 });
 
+const upsertEstudianteDatosBasicos = async (userId, effectiveRol, estudiantePayload = {}, body = {}) => {
+  if (effectiveRol !== 'estudiante') return;
+  const nivel =
+    estudiantePayload.nivel_estudiante ??
+    estudiantePayload.nivel ??
+    body.nivel_estudiante ??
+    body.nivel ??
+    null;
+  const grado =
+    estudiantePayload.grado_estudiante ??
+    estudiantePayload.grado ??
+    body.grado_estudiante ??
+    body.grado ??
+    null;
+  const seccion =
+    estudiantePayload.seccion_estudiante ??
+    estudiantePayload.seccion ??
+    body.seccion_estudiante ??
+    body.seccion ??
+    null;
+  const matricula = estudiantePayload.matricula ?? body.matricula ?? null;
+
+  const hasAcademic = nivel || grado || seccion || matricula;
+  if (!hasAcademic) return;
+
+  console.log('[upsertEstudianteDatosBasicos] Datos a guardar', {
+    userId,
+    nivel,
+    grado,
+    seccion,
+    matricula,
+    effectiveRol,
+  });
+
+  await db.query(
+    `INSERT INTO estudiante_datos (usuario_id, nivel, grado, seccion, matricula)
+     VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       nivel = VALUES(nivel),
+       grado = VALUES(grado),
+       seccion = VALUES(seccion),
+       matricula = VALUES(matricula)`,
+    [userId, nivel || null, grado || null, seccion || null, matricula || null],
+    { tag: 'user.update.estudiante_datos' },
+  );
+};
+
 const updateUserHandler = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { nombre, rol, password } = req.body;
+  const { nombre, rol, password, email, activo } = req.body;
+  const estudiantePayload = req.body.estudiante || req.body.datos_estudiante || {};
+
+  console.log('[updateUserHandler] Payload recibido', {
+    id,
+    nombre,
+    rol,
+    email,
+    activo,
+    tienePassword: Boolean(password),
+    estudiante: estudiantePayload,
+    bodyNivel: req.body.nivel ?? req.body.nivel_estudiante ?? null,
+    bodyGrado: req.body.grado ?? req.body.grado_estudiante ?? null,
+    bodySeccion: req.body.seccion ?? req.body.seccion_estudiante ?? null,
+    bodyMatricula: req.body.matricula ?? null,
+    passwordLen: typeof password === 'string' ? password.length : 0,
+  });
+
+  // Log completo (sin exponer contraseña) para depurar qué llega desde el frontend
+  const safeBody = {
+    ...req.body,
+    password: password ? `*** (${password.length} chars)` : undefined,
+  };
+  logger.info({ userId: id, body: safeBody }, 'PUT /usuarios/:id payload recibido');
+
+  const campos = [];
+  const valores = [];
+
+  if (nombre !== undefined) {
+    campos.push('nombre = ?');
+    valores.push(nombre);
+  }
+  if (rol !== undefined) {
+    campos.push('rol = ?');
+    valores.push(rol);
+  }
+  if (email !== undefined) {
+    campos.push('email = ?');
+    valores.push(email);
+  }
+  if (activo !== undefined) {
+    campos.push('activo = ?');
+    valores.push(Boolean(activo));
+  }
 
   if (password) {
     const hash = await bcrypt.hash(password, 10);
-    await db.query(
-      'UPDATE usuarios SET nombre = ?, rol = ?, password = ? WHERE id = ?',
-      [nombre, rol, hash, id],
-      { tag: 'user.update.withPassword' },
-    );
-    return res.json({ message: 'Usuario actualizado con nueva contraseÃƒÂ±a' });
+    campos.push('password = ?');
+    valores.push(hash);
   }
 
-  await db.query(
-    'UPDATE usuarios SET nombre = ?, rol = ? WHERE id = ?',
-    [nombre, rol, id],
-    { tag: 'user.update' },
+  const tieneActualizacionUsuario = campos.length > 0;
+
+  if (tieneActualizacionUsuario) {
+    valores.push(id);
+    await db.query(
+      `UPDATE usuarios SET ${campos.join(', ')} WHERE id = ?`,
+      valores,
+      { tag: password ? 'user.update.withPassword' : 'user.update' },
+    );
+  }
+
+  // Upsert datos academicos si corresponde
+  const [current] = await db.query('SELECT rol FROM usuarios WHERE id = ?', [id]);
+  const effectiveRol = rol || current?.rol || null;
+  await upsertEstudianteDatosBasicos(id, effectiveRol, estudiantePayload, req.body);
+
+  res.json({
+    message: password
+      ? 'Usuario actualizado con nueva contraseña'
+      : 'Usuario actualizado',
+  });
+  logger.info(
+    {
+      userId: id,
+      updatedCampos: campos.map((c) => c.split('=')[0].trim()),
+      withPassword: Boolean(password),
+    },
+    'PUT /usuarios/:id actualizado correctamente',
   );
-  res.json({ message: 'Usuario actualizado' });
 });
 
 const deleteUserHandler = asyncHandler(async (req, res) => {
@@ -864,9 +1292,10 @@ const updateDatosCompletosHandler = asyncHandler(async (req, res) => {
   try {
     if (estudiante) {
       await db.query(
-        `INSERT INTO estudiante_datos (usuario_id, matricula, grado, seccion, promedio_general, porcentaje_asistencia, estado_academico)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO estudiante_datos (usuario_id, nivel, matricula, grado, seccion, promedio_general, porcentaje_asistencia, estado_academico)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
+           nivel = VALUES(nivel),
            matricula = VALUES(matricula),
            grado = VALUES(grado),
            seccion = VALUES(seccion),
@@ -875,6 +1304,7 @@ const updateDatosCompletosHandler = asyncHandler(async (req, res) => {
            estado_academico = VALUES(estado_academico)`,
         [
           id,
+          estudiante.nivel ?? estudiante.nivel_estudiante ?? null,
           estudiante.matricula,
           estudiante.grado,
           estudiante.seccion,
@@ -1239,7 +1669,7 @@ app.get('/healthz', asyncHandler(async (req, res) => {
   });
 }));
 
-/* ===================== GestiÃƒÂ³n de Estado y Permisos ===================== */
+/* ===================== Gestion de Estado y Permisos ===================== */
 
 // Endpoint para activar un usuario (solo admin)
 app.put(
@@ -1299,7 +1729,7 @@ app.put(
         return res.status(404).json({ error: 'Usuario no encontrado' });
       }
 
-      // No permitir que un admin se desactive a sÃƒÂ­ mismo
+      // No permitir que un admin se desactive asi­ mismo
       if (usuario.id === adminId) {
         return res.status(400).json({ error: 'No puedes desactivar tu propia cuenta' });
       }
@@ -1385,7 +1815,7 @@ app.put(
     const { puede_ver, puede_crear, puede_editar, puede_eliminar, descripcion } = req.body;
 
     try {
-      // Construir query dinÃƒÂ¡micamente solo con los campos proporcionados
+      // Construir query dinamicamente solo con los campos proporcionados
       const updates = [];
       const values = [];
 
@@ -1519,120 +1949,129 @@ app.put(
 
       // Actualizar datos personales en tabla usuarios
       if (datos_personales && typeof datos_personales === 'object') {
-        const camposActualizar = [];
-        const valoresActualizar = [];
+        try {
+          const camposActualizar = [];
+          const valoresActualizar = [];
 
-        const sanitizar = (v) => (v === undefined ? undefined : (v || '').trim());
-        logger.info(
-          {
-            userId: id,
-            payloadUbicacion: {
-              direccion: datos_personales?.direccion,
-              departamento: datos_personales?.departamento,
-              provincia: datos_personales?.provincia,
-              distrito: datos_personales?.distrito,
-            },
-          },
-          'Payload recibido para actualizar direccion/ubigeo',
-        );
-
-        if (datos_personales.nombres) {
-          camposActualizar.push('nombres = ?');
-          valoresActualizar.push(datos_personales.nombres.trim());
-        }
-        if (datos_personales.apellido_paterno) {
-          camposActualizar.push('apellido_paterno = ?');
-          valoresActualizar.push(datos_personales.apellido_paterno.trim());
-        }
-        if (datos_personales.apellido_materno) {
-          camposActualizar.push('apellido_materno = ?');
-          valoresActualizar.push(datos_personales.apellido_materno.trim());
-        }
-        if (Object.prototype.hasOwnProperty.call(datos_personales, 'direccion')) {
-          const direccion = sanitizar(datos_personales.direccion);
-          camposActualizar.push('direccion = ?');
-          valoresActualizar.push(direccion || null);
-        }
-        if (Object.prototype.hasOwnProperty.call(datos_personales, 'departamento')) {
-          const dep = sanitizar(datos_personales.departamento);
-          camposActualizar.push('departamento = ?');
-          valoresActualizar.push(dep || null);
-        }
-        if (Object.prototype.hasOwnProperty.call(datos_personales, 'provincia')) {
-          const prov = sanitizar(datos_personales.provincia);
-          camposActualizar.push('provincia = ?');
-          valoresActualizar.push(prov || null);
-        }
-        if (Object.prototype.hasOwnProperty.call(datos_personales, 'distrito')) {
-          const dist = sanitizar(datos_personales.distrito);
-          camposActualizar.push('distrito = ?');
-          valoresActualizar.push(dist || null);
-        }
-        if (datos_personales.fecha_nacimiento) {
-          camposActualizar.push('fecha_nacimiento = ?');
-          valoresActualizar.push(datos_personales.fecha_nacimiento);
-        }
-        if (datos_personales.genero) {
-          camposActualizar.push('genero = ?');
-          valoresActualizar.push(datos_personales.genero);
-        }
-        if (datos_personales.nacionalidad) {
-          camposActualizar.push('nacionalidad = ?');
-          valoresActualizar.push(datos_personales.nacionalidad);
-        }
-        if (datos_personales.estado_civil) {
-          camposActualizar.push('estado_civil = ?');
-          valoresActualizar.push(datos_personales.estado_civil);
-        }
-        if (datos_personales.documento_identidad) {
-          camposActualizar.push('documento_identidad = ?');
-          valoresActualizar.push(datos_personales.documento_identidad);
-        }
-        if (datos_personales.tipo_documento) {
-          camposActualizar.push('tipo_documento = ?');
-          valoresActualizar.push(datos_personales.tipo_documento);
-        }
-        if (datos_personales.telefono !== undefined) {
-          camposActualizar.push('telefono = ?');
-          valoresActualizar.push(datos_personales.telefono);
-        }
-        if (datos_personales.foto_perfil !== undefined) {
-          camposActualizar.push('foto_perfil = ?');
-          valoresActualizar.push(datos_personales.foto_perfil);
-        }
-
-        const nombreCompleto = [
-          datos_personales.nombres,
-          datos_personales.apellido_paterno,
-          datos_personales.apellido_materno,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .trim();
-
-        if (nombreCompleto) {
-          camposActualizar.push('nombre = ?');
-          valoresActualizar.push(nombreCompleto);
-        }
-
-        if (camposActualizar.length > 0) {
-          camposActualizar.push('ultima_actualizacion = CURRENT_TIMESTAMP');
-          valoresActualizar.push(id);
-
+          const sanitizar = (v) => (v === undefined ? undefined : (v || '').trim());
           logger.info(
-            { userId: id, camposActualizar, valoresActualizar },
-            'Ejecutando UPDATE de datos personales',
+            {
+              userId: id,
+              payloadUbicacion: {
+                direccion: datos_personales?.direccion,
+                departamento: datos_personales?.departamento,
+                provincia: datos_personales?.provincia,
+                distrito: datos_personales?.distrito,
+              },
+            },
+            'Payload recibido para actualizar direccion/ubigeo',
           );
 
-          await db.query(
-            `UPDATE usuarios SET ${camposActualizar.join(', ')} WHERE id = ?`,
-            valoresActualizar
+          if (datos_personales.nombres) {
+            camposActualizar.push('nombres = ?');
+            valoresActualizar.push(datos_personales.nombres.trim());
+          }
+          if (datos_personales.apellido_paterno) {
+            camposActualizar.push('apellido_paterno = ?');
+            valoresActualizar.push(datos_personales.apellido_paterno.trim());
+          }
+          if (datos_personales.apellido_materno) {
+            camposActualizar.push('apellido_materno = ?');
+            valoresActualizar.push(datos_personales.apellido_materno.trim());
+          }
+          if (Object.prototype.hasOwnProperty.call(datos_personales, 'direccion')) {
+            const direccion = sanitizar(datos_personales.direccion);
+            camposActualizar.push('direccion = ?');
+            valoresActualizar.push(direccion || null);
+          }
+          if (Object.prototype.hasOwnProperty.call(datos_personales, 'departamento')) {
+            const dep = sanitizar(datos_personales.departamento);
+            camposActualizar.push('departamento = ?');
+            valoresActualizar.push(dep || null);
+          }
+          if (Object.prototype.hasOwnProperty.call(datos_personales, 'provincia')) {
+            const prov = sanitizar(datos_personales.provincia);
+            camposActualizar.push('provincia = ?');
+            valoresActualizar.push(prov || null);
+          }
+          if (Object.prototype.hasOwnProperty.call(datos_personales, 'distrito')) {
+            const dist = sanitizar(datos_personales.distrito);
+            camposActualizar.push('distrito = ?');
+            valoresActualizar.push(dist || null);
+          }
+          if (datos_personales.fecha_nacimiento) {
+            camposActualizar.push('fecha_nacimiento = ?');
+            valoresActualizar.push(datos_personales.fecha_nacimiento);
+          }
+          if (datos_personales.genero) {
+            camposActualizar.push('genero = ?');
+            valoresActualizar.push(datos_personales.genero);
+          }
+          if (datos_personales.nacionalidad) {
+            camposActualizar.push('nacionalidad = ?');
+            valoresActualizar.push(datos_personales.nacionalidad);
+          }
+          if (datos_personales.estado_civil) {
+            camposActualizar.push('estado_civil = ?');
+            valoresActualizar.push(datos_personales.estado_civil);
+          }
+          if (datos_personales.documento_identidad) {
+            camposActualizar.push('documento_identidad = ?');
+            valoresActualizar.push(datos_personales.documento_identidad);
+          }
+          if (datos_personales.tipo_documento) {
+            camposActualizar.push('tipo_documento = ?');
+            valoresActualizar.push(datos_personales.tipo_documento);
+          }
+          if (datos_personales.telefono !== undefined) {
+            camposActualizar.push('telefono = ?');
+            valoresActualizar.push(datos_personales.telefono);
+          }
+          if (datos_personales.foto_perfil !== undefined) {
+            camposActualizar.push('foto_perfil = ?');
+            valoresActualizar.push(datos_personales.foto_perfil);
+          }
+
+          const nombreCompleto = [
+            datos_personales.nombres,
+            datos_personales.apellido_paterno,
+            datos_personales.apellido_materno,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+
+          if (nombreCompleto) {
+            camposActualizar.push('nombre = ?');
+            valoresActualizar.push(nombreCompleto);
+          }
+
+          if (camposActualizar.length > 0) {
+            camposActualizar.push('ultima_actualizacion = CURRENT_TIMESTAMP');
+            valoresActualizar.push(id);
+
+            logger.info(
+              { userId: id, camposActualizar, valoresActualizar },
+              'Ejecutando UPDATE de datos personales',
+            );
+
+            await db.query(
+              `UPDATE usuarios SET ${camposActualizar.join(', ')} WHERE id = ?`,
+              valoresActualizar
+            );
+          }
+        } catch (error) {
+          if (!isMissingTableError(error) && !isBadFieldError(error)) {
+            throw error;
+          }
+          logger.warn(
+            { err: error, userId: id },
+            'Campos faltantes en usuarios, omitiendo update de datos personales',
           );
         }
-
       }
 
-      // Actualizar datos especÃƒÂ­ficos segÃƒÂºn rol
+      // Actualizar datos específicos según rol
       if (rolUsuario === 'estudiante' && datos_estudiante) {
         // Verificar si ya existe registro
         const existeEstudiante = await db.query(
@@ -1643,6 +2082,11 @@ app.put(
         const camposEstudiante = [];
         const valoresEstudiante = [];
 
+        const nivelEst = datos_estudiante.nivel ?? datos_estudiante.nivel_estudiante;
+        if (nivelEst) {
+          camposEstudiante.push('nivel = ?');
+          valoresEstudiante.push(nivelEst);
+        }
         if (datos_estudiante.matricula) {
           camposEstudiante.push('matricula = ?');
           valoresEstudiante.push(datos_estudiante.matricula);
@@ -1720,97 +2164,94 @@ app.put(
       }
 
       if ((rolUsuario === 'docente' || rolUsuario === 'profesor') && datos_docente) {
-        // Verificar si ya existe registro
-        const existeDocente = await db.query(
-          'SELECT id FROM docente_datos WHERE usuario_id = ?',
-          [id]
-        );
+        try {
+          const existeDocente = await db.query(
+            'SELECT id FROM docente_datos WHERE usuario_id = ?',
+            [id]
+          );
 
-        // Obtener la fecha de creaciÃƒÂ³n del usuario para usar como fecha_ingreso
-        const [usuarioInfo] = await db.query(
-          'SELECT created_at FROM usuarios WHERE id = ?',
-          [id]
-        );
+          const camposDocente = [];
+          const valoresDocente = [];
 
-        const camposDocente = [];
-        const valoresDocente = [];
+          const normalizarTexto = (v) =>
+            v === undefined || v === null ? undefined : String(v).trim();
 
-        if (datos_docente.especialidad) {
-          camposDocente.push('especialidad = ?');
-          valoresDocente.push(datos_docente.especialidad);
-        }
-        if (datos_docente.nivel_academico) {
-          camposDocente.push('nivel_academico = ?');
-          valoresDocente.push(datos_docente.nivel_academico);
-        }
-        if (datos_docente.titulo_profesional) {
-          camposDocente.push('titulo_profesional = ?');
-          valoresDocente.push(datos_docente.titulo_profesional);
-        }
-        if (datos_docente.universidad_egreso) {
-          camposDocente.push('universidad_egreso = ?');
-          valoresDocente.push(datos_docente.universidad_egreso);
-        }
-        if (datos_docente.numero_colegiatura) {
-          camposDocente.push('numero_colegiatura = ?');
-          valoresDocente.push(datos_docente.numero_colegiatura);
-        }
-        if (datos_docente.carga_horaria_semanal !== undefined) {
-          camposDocente.push('carga_horaria_semanal = ?');
-          valoresDocente.push(datos_docente.carga_horaria_semanal);
-        }
-
-        // Siempre guardar fecha_ingreso (usar fecha de creaciÃƒÂ³n de cuenta si no existe)
-        if (!existeDocente || existeDocente.length === 0) {
-          // Solo al insertar por primera vez, usar fecha de creaciÃƒÂ³n
-          camposDocente.push('fecha_ingreso = ?');
-          valoresDocente.push(usuarioInfo?.created_at || new Date());
-        } else if (datos_docente.fecha_ingreso) {
-          // Si ya existe y se envÃƒÂ­a una fecha, actualizarla
-          camposDocente.push('fecha_ingreso = ?');
-          valoresDocente.push(datos_docente.fecha_ingreso);
-        }
-
-        if (datos_docente.areas_investigacion) {
-          camposDocente.push('areas_investigacion = ?');
-          valoresDocente.push(datos_docente.areas_investigacion);
-        }
-        if (datos_docente.idiomas_domina) {
-          camposDocente.push('idiomas_domina = ?');
-          valoresDocente.push(datos_docente.idiomas_domina);
-        }
-        if (datos_docente.nivel_ingles) {
-          camposDocente.push('nivel_ingles = ?');
-          valoresDocente.push(datos_docente.nivel_ingles);
-        }
-        if (datos_docente.disponibilidad_horaria) {
-          camposDocente.push('disponibilidad_horaria = ?');
-          valoresDocente.push(datos_docente.disponibilidad_horaria);
-        }
-        if (datos_docente.observaciones !== undefined) {
-          camposDocente.push('observaciones = ?');
-          valoresDocente.push(datos_docente.observaciones);
-        }
-
-        if (camposDocente.length > 0) {
-          if (existeDocente && existeDocente.length > 0) {
-            // Actualizar
-            valoresDocente.push(id);
-            await db.query(
-              `UPDATE docente_datos SET ${camposDocente.join(', ')} WHERE docente_id = ?`,
-              valoresDocente
-            );
-          } else {
-            // Insertar nuevo
-            camposDocente.push('docente_id = ?');
-            valoresDocente.push(id);
-            const placeholders = Array(camposDocente.length).fill('?').join(', ');
-            const campos = camposDocente.map(c => c.split(' = ')[0]).join(', ');
-            await db.query(
-              `INSERT INTO docente_datos (${campos}) VALUES (${placeholders})`,
-              valoresDocente
-            );
+          if (datos_docente.titulo_profesional && DOCENTE_ALLOWED_FIELDS.has('titulo_profesional')) {
+            camposDocente.push('titulo_profesional = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.titulo_profesional));
           }
+
+          if (datos_docente.universidad_egreso && DOCENTE_ALLOWED_FIELDS.has('universidad_egreso')) {
+            camposDocente.push('universidad_egreso = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.universidad_egreso));
+          }
+
+          if (datos_docente.numero_colegiatura && DOCENTE_ALLOWED_FIELDS.has('numero_colegiatura')) {
+            camposDocente.push('numero_colegiatura = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.numero_colegiatura));
+          }
+
+          if (DOCENTE_ALLOWED_FIELDS.has('carga_horaria_semanal') && datos_docente.carga_horaria_semanal !== undefined) {
+            camposDocente.push('carga_horaria_semanal = ?');
+            valoresDocente.push(Number(datos_docente.carga_horaria_semanal) || 0);
+          }
+
+          if (datos_docente.areas_investigacion && DOCENTE_ALLOWED_FIELDS.has('areas_investigacion')) {
+            camposDocente.push('areas_investigacion = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.areas_investigacion));
+          }
+
+          if (datos_docente.publicaciones && DOCENTE_ALLOWED_FIELDS.has('publicaciones')) {
+            camposDocente.push('publicaciones = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.publicaciones));
+          }
+
+          if (datos_docente.idiomas_domina && DOCENTE_ALLOWED_FIELDS.has('idiomas_domina')) {
+            camposDocente.push('idiomas_domina = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.idiomas_domina));
+          }
+
+          if (datos_docente.nivel_ingles && DOCENTE_ALLOWED_FIELDS.has('nivel_ingles')) {
+            camposDocente.push('nivel_ingles = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.nivel_ingles));
+          }
+
+          if (datos_docente.disponibilidad_horaria && DOCENTE_ALLOWED_FIELDS.has('disponibilidad_horaria')) {
+            camposDocente.push('disponibilidad_horaria = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.disponibilidad_horaria));
+          }
+
+          if (datos_docente.observaciones !== undefined && DOCENTE_ALLOWED_FIELDS.has('observaciones')) {
+            camposDocente.push('observaciones = ?');
+            valoresDocente.push(normalizarTexto(datos_docente.observaciones));
+          }
+
+          if (camposDocente.length > 0) {
+            if (existeDocente && existeDocente.length > 0) {
+              valoresDocente.push(id);
+              await db.query(
+                `UPDATE docente_datos SET ${camposDocente.join(', ')} WHERE usuario_id = ?`,
+                valoresDocente
+              );
+            } else {
+              camposDocente.push('usuario_id = ?');
+              valoresDocente.push(id);
+              const placeholders = Array(camposDocente.length).fill('?').join(', ');
+              const campos = camposDocente.map((c) => c.split(' = ')[0]).join(', ');
+              await db.query(
+                `INSERT INTO docente_datos (${campos}) VALUES (${placeholders})`,
+                valoresDocente
+              );
+            }
+          }
+        } catch (error) {
+          if (!isMissingTableError(error) && !isBadFieldError(error)) {
+            throw error;
+          }
+          logger.warn(
+            { err: error, userId: id },
+            'Tabla/columnas de docente_datos faltantes, omitiendo update de docente',
+          );
         }
       }
 
@@ -2081,21 +2522,62 @@ app.get(
 
     try {
       const [usuario] = await db.query(
-        'SELECT foto_perfil_imagen, foto_perfil_tipo FROM usuarios WHERE id = ?',
+        'SELECT foto_perfil_imagen, foto_perfil_tipo, foto_perfil FROM usuarios WHERE id = ?',
         [id],
         { tag: 'user.getFotoPerfil' }
       );
 
-      if (!usuario || !usuario.foto_perfil_imagen) {
-        return res.status(404).json({ error: 'Foto de perfil no encontrada' });
+      if (!usuario) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
       }
 
-      // Establecer tipo de contenido
-      res.setHeader('Content-Type', usuario.foto_perfil_tipo || 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache por 24 horas
+      const sendBuffer = (buffer, mimeType) => {
+        if (!buffer) return false;
+        res.setHeader('Content-Type', mimeType || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache por 24 horas
+        res.send(buffer);
+        return true;
+      };
 
-      // Enviar la imagen
-      res.send(usuario.foto_perfil_imagen);
+      // Preferimos la imagen en binario (columnas *_imagen y *_tipo)
+      if (usuario.foto_perfil_imagen) {
+        return sendBuffer(usuario.foto_perfil_imagen, usuario.foto_perfil_tipo);
+      }
+
+      // Soporte retro: si solo hay string en foto_perfil, intentamos servirlo
+      const fotoPerfil = (usuario.foto_perfil || '').trim();
+      if (fotoPerfil) {
+        // 1) Data URL completa (data:image/png;base64,XXXX)
+        const dataUrlMatch = fotoPerfil.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+        if (dataUrlMatch) {
+          const [, mimeType, data] = dataUrlMatch;
+          const buffer = Buffer.from(data, 'base64');
+          if (sendBuffer(buffer, mimeType)) return;
+        }
+
+        // 2) Cadena base64 sin prefijo
+        const base64Like = /^[A-Za-z0-9+/]+={0,2}$/;
+        if (base64Like.test(fotoPerfil) && fotoPerfil.length > 40) {
+          const buffer = Buffer.from(fotoPerfil, 'base64');
+          if (sendBuffer(buffer, usuario.foto_perfil_tipo)) return;
+        }
+
+        // 3) URL externa: redirigimos
+        if (/^https?:\/\//i.test(fotoPerfil)) {
+          return res.redirect(fotoPerfil);
+        }
+
+        // 4) Ruta de archivo accesible localmente
+        const absolutePath = path.isAbsolute(fotoPerfil)
+          ? fotoPerfil
+          : path.join(__dirname, fotoPerfil);
+        if (fs.existsSync(absolutePath)) {
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return fs.createReadStream(absolutePath).pipe(res);
+        }
+      }
+
+      return res.status(404).json({ error: 'Foto de perfil no encontrada' });
 
     } catch (error) {
       logger.error({ error: error.message, userId: id }, 'Error al obtener foto de perfil');
@@ -2103,6 +2585,7 @@ app.get(
     }
   }
 );
+
 
 // Endpoint para eliminar foto de perfil
 app.delete(

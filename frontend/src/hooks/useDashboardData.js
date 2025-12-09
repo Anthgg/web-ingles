@@ -11,7 +11,6 @@ const initialState = {
   estudiantes: [],
   cursosConProfesor: [],
   misCursos: [],
-  cursosDisponibles: [],
   asignacionesDocente: [],
 };
 
@@ -74,7 +73,9 @@ export const useDashboardData = () => {
   const fetchUsuarios = useCallback(async () => {
     if (!token) return [];
     try {
+      console.log('[useDashboardData.fetchUsuarios] usando token (len):', token ? token.length : 0);
       const usuarios = await adminApi.getUsuarios();
+      console.log('[useDashboardData.fetchUsuarios] total recibidos:', Array.isArray(usuarios) ? usuarios.length : 'n/a');
       if (!mountedRef.current) return usuarios;
       setData((prev) => ({ ...prev, usuarios }));
       return usuarios;
@@ -103,10 +104,10 @@ export const useDashboardData = () => {
     }
   }, [token, showError]);
 
-  const fetchAsistencias = useCallback(async () => {
+  const fetchAsistencias = useCallback(async (filters = {}) => {
     if (!token) return [];
     try {
-      const asistencias = await adminApi.getAsistencias();
+      const asistencias = await adminApi.getAsistencias(filters);
       if (!mountedRef.current) return asistencias;
       setData((prev) => ({ ...prev, asistencias }));
       return asistencias;
@@ -145,6 +146,24 @@ export const useDashboardData = () => {
     } catch (err) {
       console.error('Error en fetchAsistenciasDocente:', err);
       showError(err.message || 'Error al cargar tus asistencias');
+      if (!mountedRef.current) return [];
+      setData((prev) => ({ ...prev, asistencias: [] }));
+      return [];
+    }
+  }, [token, showError]);
+
+  const fetchMisAsistencias = useCallback(async (silent = false, filters = {}) => {
+    if (!token) return [];
+    try {
+      const asistencias = await studentApi.getMisAsistencias(filters);
+      if (!mountedRef.current) return asistencias;
+      setData((prev) => ({ ...prev, asistencias }));
+      return asistencias;
+    } catch (err) {
+      console.error('Error en fetchMisAsistencias:', err);
+      if (!silent) {
+        showError(err.message || 'No se pudieron cargar tus asistencias');
+      }
       if (!mountedRef.current) return [];
       setData((prev) => ({ ...prev, asistencias: [] }));
       return [];
@@ -241,6 +260,13 @@ export const useDashboardData = () => {
   const fetchMisCursos = useCallback(async (silent = false) => {
     if (!token) return [];
     try {
+      // Limpiar inscripciones huérfanas primero
+      try {
+        await studentApi.limpiarInscripciones();
+      } catch (cleanError) {
+        console.warn('Error limpiando inscripciones:', cleanError);
+      }
+      
       const misCursos = await studentApi.getMisCursos();
       if (!mountedRef.current) return misCursos;
       setData((prev) => ({ ...prev, misCursos }));
@@ -256,51 +282,6 @@ export const useDashboardData = () => {
     }
   }, [token, showError]);
 
-  const fetchCursosDisponibles = useCallback(async (silent = false) => {
-    if (!token) return [];
-    try {
-      const cursosDisponibles = await studentApi.getCursosDisponibles();
-      if (!mountedRef.current) return cursosDisponibles;
-      setData((prev) => ({ ...prev, cursosDisponibles }));
-      return cursosDisponibles;
-    } catch (err) {
-      console.error('Error en fetchCursosDisponibles:', err);
-      if (!silent) {
-        showError(err.message || 'No se pudieron cargar los cursos disponibles');
-      }
-      if (!mountedRef.current) return [];
-      setData((prev) => ({ ...prev, cursosDisponibles: [] }));
-      return [];
-    }
-  }, [token, showError]);
-
-  const inscribirEnCurso = useCallback(async (asignacionId) => {
-    if (!token) return false;
-    try {
-      await studentApi.inscribirEnCurso({ asignacionId });
-      showSuccess('Inscripción completada correctamente');
-      await Promise.all([fetchMisCursos(true), fetchCursosDisponibles(true)]);
-      return true;
-    } catch (err) {
-      console.error('Error inscribiendo en curso:', err);
-      showError(err.message || 'No se pudo completar la inscripción');
-      return false;
-    }
-  }, [token, fetchMisCursos, fetchCursosDisponibles, showError, showSuccess]);
-
-  const cancelarInscripcionCurso = useCallback(async (asignacionId) => {
-    if (!token) return false;
-    try {
-      await studentApi.cancelarInscripcionCurso({ asignacionId });
-      showSuccess('Te has dado de baja del curso correctamente');
-      await Promise.all([fetchMisCursos(true), fetchCursosDisponibles(true)]);
-      return true;
-    } catch (err) {
-      console.error('Error cancelando inscripción:', err);
-      showError(err.message || 'No se pudo cancelar la inscripción');
-      return false;
-    }
-  }, [token, fetchMisCursos, fetchCursosDisponibles, showError, showSuccess]);
 
   const fetchAll = useCallback(async () => {
     if (!token || !user) return;
@@ -327,7 +308,7 @@ export const useDashboardData = () => {
         await Promise.all([
           fetchClases(),
           fetchMisCursos(true),
-          fetchCursosDisponibles(true),
+          fetchMisAsistencias(true),
         ]);
       }
     } catch (err) {
@@ -351,7 +332,7 @@ export const useDashboardData = () => {
     fetchAsignacionesDocente,
     fetchAsistenciasDocente,
     fetchMisCursos,
-    fetchCursosDisponibles,
+    fetchMisAsistencias,
     showError,
   ]);
 
@@ -407,9 +388,7 @@ export const useDashboardData = () => {
     fetchCursosConProfesorNuevo,
     fetchAsignacionesDocente,
     fetchMisCursos,
-    fetchCursosDisponibles,
-    inscribirEnCurso,
-    cancelarInscripcionCurso,
+    fetchMisAsistencias,
     fetchAll,
     logout,
     updateTwoFactorStatus,

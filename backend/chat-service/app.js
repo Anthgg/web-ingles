@@ -159,7 +159,9 @@ const fetchUsersByIds = async (userIds = []) => {
 
   const placeholders = normalizedIds.map(() => '?').join(',');
   const [rows] = await getAuthDb().execute(
-    `SELECT id, nombre, rol FROM usuarios WHERE id IN (${placeholders})`,
+    `SELECT id, nombre, nombres, apellido_paterno, apellido_materno, rol,
+            CASE WHEN foto_perfil_imagen IS NOT NULL THEN 1 ELSE 0 END as tiene_foto_perfil
+     FROM usuarios WHERE id IN (${placeholders})`,
     normalizedIds
   );
 
@@ -177,6 +179,20 @@ const isStudentRole = (role) => {
 const isAdminRole = (role) => {
   if (!role) return false;
   return ADMIN_ROLES.has(String(role).toLowerCase());
+};
+
+// Helper para obtener el nombre completo del usuario
+const getUserDisplayName = (userInfo) => {
+  if (!userInfo) return null;
+  
+  // Si tiene nombres y apellidos, usar esos
+  if (userInfo.nombres && userInfo.apellido_paterno) {
+    const apellidoMaterno = userInfo.apellido_materno ? ` ${userInfo.apellido_materno}` : '';
+    return `${userInfo.nombres} ${userInfo.apellido_paterno}${apellidoMaterno}`;
+  }
+  
+  // Si no, usar el nombre de usuario
+  return userInfo.nombre || null;
 };
 
 const toPlainBool = (value) => value === true || value === 1 || value === '1';
@@ -489,6 +505,10 @@ io.on('connection', (socket) => {
   const connectedUserId = Number(socket.data?.user?.id);
   console.log('User connected:', socket.id, 'userId:', Number.isInteger(connectedUserId) ? connectedUserId : 'unknown');
 
+  if (Number.isInteger(connectedUserId)) {
+    socket.join(`user_${connectedUserId}`);
+  }
+
   socket.on('join_room', async (roomId) => {
     const numericRoomId = Number(roomId);
     const userId = Number(socket.data?.user?.id);
@@ -622,7 +642,38 @@ io.on('connection', (socket) => {
         return;
       }
       const message = normalizeMessageRow(rows[0]);
+
+      try {
+        await connectionPool.execute(
+          'UPDATE chat_participants SET archived = 0 WHERE room_id = ? AND archived = 1',
+          [normalizedRoomId]
+        );
+      } catch (unarchiveError) {
+        console.warn('No se pudo reactivar el chat archivado:', unarchiveError.message);
+      }
+
       io.to(normalizedRoomId).emit('receive_message', message);
+
+      try {
+        const [participantRows] = await connectionPool.execute(
+          'SELECT user_id FROM chat_participants WHERE room_id = ?',
+          [normalizedRoomId]
+        );
+
+        const uniqueUserIds = Array.from(
+          new Set(
+            participantRows
+              .map((participant) => Number(participant.user_id))
+              .filter((participantId) => Number.isInteger(participantId))
+          )
+        );
+
+        uniqueUserIds.forEach((participantId) => {
+          io.to(`user_${participantId}`).emit('receive_message', message);
+        });
+      } catch (notifyError) {
+        console.error('Error delivering message notification:', notifyError.message);
+      }
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -645,7 +696,8 @@ const buildParticipantMap = (participants, userLookup) => {
       userId,
       role: participant.role,
       userRole: userInfo.rol || null,
-      userName: userInfo.nombre || null,
+      userName: getUserDisplayName(userInfo),
+      tieneFotoPerfil: userInfo.tiene_foto_perfil || 0,
     });
     return acc;
   }, {});
@@ -1236,8 +1288,12 @@ app.post('/rooms', authenticate, async (req, res) => {
 
     // Si es un grupo, emitir evento a todos los participantes
     if (isGroupType(normalizedType)) {
-      const [creatorRows] = await authPool.execute('SELECT nombre FROM usuarios WHERE id = ?', [currentUserId]);
-      const creatorName = creatorRows.length > 0 ? creatorRows[0].nombre : 'Usuario';
+      const [creatorRows] = await authPool.execute(
+        'SELECT nombre, nombres, apellido_paterno, apellido_materno FROM usuarios WHERE id = ?', 
+        [currentUserId]
+      );
+      const creatorInfo = creatorRows.length > 0 ? creatorRows[0] : null;
+      const creatorName = getUserDisplayName(creatorInfo) || 'Usuario';
 
       // Emitir a todos los participantes
       participantIds.forEach(participantId => {
@@ -1280,8 +1336,12 @@ app.post('/rooms/:roomId/leave', authenticate, async (req, res) => {
     // Obtener nombre del usuario que sale
     const pool = getDb();
     const authPool = getAuthDb();
-    const [userRows] = await authPool.execute('SELECT nombre FROM usuarios WHERE id = ?', [currentUserId]);
-    const userName = userRows.length > 0 ? userRows[0].nombre : 'Usuario';
+    const [userRows] = await authPool.execute(
+      'SELECT nombre, nombres, apellido_paterno, apellido_materno FROM usuarios WHERE id = ?', 
+      [currentUserId]
+    );
+    const userInfo = userRows.length > 0 ? userRows[0] : null;
+    const userName = getUserDisplayName(userInfo) || 'Usuario';
 
     // SOLO eliminar al participante del grupo (el usuario abandona el chat)
     await pool.execute('DELETE FROM chat_participants WHERE room_id = ? AND user_id = ?', [numericRoomId, currentUserId]);
@@ -1470,11 +1530,12 @@ app.post('/rooms/:roomId/participants', authenticate, async (req, res) => {
 
       // Obtener nombre del usuario agregado
       const [userRows] = await authPool.execute(
-        'SELECT nombre FROM usuarios WHERE id = ?',
+        'SELECT nombre, nombres, apellido_paterno, apellido_materno FROM usuarios WHERE id = ?',
         [numericParticipantId]
       );
 
-      const userName = userRows.length > 0 ? userRows[0].nombre : 'Usuario';
+      const userInfo = userRows.length > 0 ? userRows[0] : null;
+      const userName = getUserDisplayName(userInfo) || 'Usuario';
 
       addedParticipants.push({
         userId: numericParticipantId,
@@ -1559,8 +1620,12 @@ app.delete('/rooms/:roomId/participants/:participantId', authenticate, async (re
     // Obtener nombres de usuarios (usar authDb para tabla usuarios)
     const pool = getDb();
     const authPool = getAuthDb();
-    const [targetUserRows] = await authPool.execute('SELECT nombre FROM usuarios WHERE id = ?', [targetUserId]);
-    const targetUserName = targetUserRows.length > 0 ? targetUserRows[0].nombre : 'Usuario';
+    const [targetUserRows] = await authPool.execute(
+      'SELECT nombre, nombres, apellido_paterno, apellido_materno FROM usuarios WHERE id = ?', 
+      [targetUserId]
+    );
+    const targetUserInfo = targetUserRows.length > 0 ? targetUserRows[0] : null;
+    const targetUserName = getUserDisplayName(targetUserInfo) || 'Usuario';
 
     // SOLO eliminar al participante del grupo (NO elimina el usuario de la base de datos)
     await pool.execute('DELETE FROM chat_participants WHERE room_id = ? AND user_id = ?', [numericRoomId, targetUserId]);
@@ -1626,13 +1691,31 @@ app.delete('/rooms/:roomId', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'No perteneces a esta sala' });
     }
 
-    if (isGroupType(room.type) && !requesterIsAdmin && requester?.role !== 'owner') {
+    const isGroup = isGroupType(room.type);
+
+    if (isGroup && !requesterIsAdmin && requester?.role !== 'owner') {
       return res.status(403).json({ error: 'Solo el propietario puede eliminar el grupo' });
+    }
+
+    if (!isGroup) {
+      if (requester) {
+        const pool = getDb();
+        await pool.execute(
+          'UPDATE chat_participants SET archived = 1 WHERE room_id = ? AND user_id = ?',
+          [numericRoomId, currentUserId]
+        );
+
+        return res.json({ ok: true, scope: 'me', archived: true });
+      }
+
+      if (!requesterIsAdmin) {
+        return res.status(403).json({ error: 'No perteneces a esta sala' });
+      }
     }
 
     await deleteRoomCascade(numericRoomId);
 
-    res.json({ ok: true });
+    res.json({ ok: true, scope: 'everyone' });
   } catch (error) {
     console.error('Error deleting room:', error);
     res.status(500).json({ error: 'No se pudo eliminar la sala' });
@@ -1790,15 +1873,23 @@ app.get('/contacts', authenticate, async (req, res) => {
     const currentUserId = Number(req.user?.id);
     const currentUserRole = req.user?.rol;
     const [rows] = await getAuthDb().execute(
-      `SELECT id, nombre, email, rol
+      `SELECT id, nombre, nombres, apellido_paterno, apellido_materno, email, rol,
+              CASE WHEN foto_perfil_imagen IS NOT NULL THEN 1 ELSE 0 END as tiene_foto_perfil
        FROM usuarios
        WHERE (activo IS NULL OR activo = 1) AND id <> ?
        ORDER BY nombre ASC`,
       [currentUserId]
     );
+    
+    // Mapear los contactos con el nombre completo
+    const contactsWithFullName = rows.map(row => ({
+      ...row,
+      nombre: getUserDisplayName(row) || row.nombre
+    }));
+    
     const sanitizedRows = isStudentRole(currentUserRole)
-      ? rows.filter((row) => !isAdminRole(row.rol))
-      : rows;
+      ? contactsWithFullName.filter((row) => !isAdminRole(row.rol))
+      : contactsWithFullName;
     res.json(sanitizedRows);
   } catch (error) {
     console.error('Error fetching contacts:', error);

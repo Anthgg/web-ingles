@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   FaUser, FaIdCard, FaEnvelope, FaPhone, FaMapMarkerAlt,
@@ -561,14 +561,12 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
   });
 
   const [datosDocente, setDatosDocente] = useState({
-    especialidad: '',
-    nivel_academico: '',
+    carga_horaria_semanal: 0,
     titulo_profesional: '',
     universidad_egreso: '',
     numero_colegiatura: '',
-    carga_horaria_semanal: 0,
-    fecha_ingreso: '',
     areas_investigacion: '',
+    publicaciones: '',
     idiomas_domina: '',
     nivel_ingles: '',
     disponibilidad_horaria: '',
@@ -722,24 +720,13 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
       }
 
       if ((usuarioRol === 'docente' || usuarioRol === 'profesor') && data.docente) {
-        // Convertir fecha_ingreso de ISO a formato yyyy-MM-dd
-        let fechaIngreso = data.docente.fecha_ingreso || data.basicos?.created_at || '';
-        if (fechaIngreso && fechaIngreso.includes('T')) {
-          fechaIngreso = fechaIngreso.split('T')[0];
-        }
-        
-        console.log('Datos docente recibidos:', data.docente);
-        console.log('nivel_academico:', data.docente.nivel_academico);
-        
         setDatosDocente({
-          especialidad: data.docente.especialidad || '',
-          nivel_academico: (data.docente.nivel_academico || '').toLowerCase(),
           titulo_profesional: data.docente.titulo_profesional || '',
           universidad_egreso: data.docente.universidad_egreso || '',
           numero_colegiatura: data.docente.numero_colegiatura || '',
           carga_horaria_semanal: data.docente.carga_horaria_semanal || 0,
-          fecha_ingreso: fechaIngreso,
           areas_investigacion: data.docente.areas_investigacion || '',
+          publicaciones: data.docente.publicaciones || '',
           idiomas_domina: data.docente.idiomas_domina || '',
           nivel_ingles: data.docente.nivel_ingles || '',
           disponibilidad_horaria: data.docente.disponibilidad_horaria || '',
@@ -1968,51 +1955,20 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
             <SectionPanel
               icon={FaBriefcase}
               title="Datos Profesionales"
-              subtitle="Registra especialidades, títulos, idiomas y disponibilidad docente."
+              subtitle="Registra los campos soportados por la base de datos."
               badge="03"
             >
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Especialidad *
-                  </label>
-                  <input
-                    type="text"
-                    value={datosDocente.especialidad}
-                    onChange={(e) => setDatosDocente({...datosDocente, especialidad: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ej: Enseñanza de Inglés"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nivel Académico
-                  </label>
-                  <select
-                    value={datosDocente.nivel_academico}
-                    onChange={(e) => setDatosDocente({...datosDocente, nivel_academico: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">Seleccione...</option>
-                    <option value="bachiller">Bachiller</option>
-                    <option value="licenciado">Licenciado</option>
-                    <option value="magister">Magíster</option>
-                    <option value="doctor">Doctor</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Título Profesional
+                    T?tulo Profesional
                   </label>
                   <input
                     type="text"
                     value={datosDocente.titulo_profesional}
                     onChange={(e) => setDatosDocente({...datosDocente, titulo_profesional: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ej: Licenciado en Educación"
+                    placeholder="Ej: Licenciado en Educaci?n"
                   />
                 </div>
 
@@ -2030,7 +1986,7 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Número de Colegiatura
+                    N?mero de Colegiatura
                   </label>
                   <input
                     type="text"
@@ -2061,25 +2017,8 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <FaCalendarAlt className="inline mr-2" />
-                    Fecha de Ingreso
-                  </label>
-                  <input
-                    type="date"
-                    value={datosDocente.fecha_ingreso || datosUsuario?.created_at?.split('T')[0] || ''}
-                    disabled
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100"
-                    title="Fecha automática de creación de cuenta"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Fecha automática de creación de cuenta
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     <FaLanguage className="inline mr-2" />
-                    Nivel de Inglés
+                    Nivel de Ingl?s
                   </label>
                   <input
                     type="text"
@@ -2092,7 +2031,7 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Áreas de Investigación
+                    ?reas de Investigaci?n
                   </label>
                   <input
                     type="text"
@@ -2105,6 +2044,19 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Publicaciones
+                  </label>
+                  <textarea
+                    value={datosDocente.publicaciones}
+                    onChange={(e) => setDatosDocente({...datosDocente, publicaciones: e.target.value})}
+                    rows="2"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Libros, art?culos, etc."
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Idiomas que Domina
                   </label>
                   <input
@@ -2112,20 +2064,20 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
                     value={datosDocente.idiomas_domina}
                     onChange={(e) => setDatosDocente({...datosDocente, idiomas_domina: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ej: Español (nativo), Inglés (C2), Francés (B1)"
+                    placeholder="Ej: Espa?ol, Ingl?s, Franc?s"
                   />
                 </div>
 
-                <div className="md:col-span-3">
+                <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Disponibilidad Horaria
                   </label>
                   <textarea
                     value={datosDocente.disponibilidad_horaria}
                     onChange={(e) => setDatosDocente({...datosDocente, disponibilidad_horaria: e.target.value})}
-                    rows="2"
+                    rows="3"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ej: Lunes a Viernes 8am-6pm, Sábados 8am-1pm"
+                    placeholder="Ej: Lunes a Viernes de 8am a 4pm"
                   />
                 </div>
 
@@ -2138,6 +2090,7 @@ const CompletarDatosUsuario = ({ token, usuarioId, usuarioRol, onClose, onSucces
                     onChange={(e) => setDatosDocente({...datosDocente, observaciones: e.target.value})}
                     rows="3"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Notas adicionales"
                   />
                 </div>
               </div>

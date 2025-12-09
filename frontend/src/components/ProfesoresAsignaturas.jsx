@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
 const API_URL = 'http://localhost:3007/asignaciones';
@@ -103,6 +103,22 @@ const DIA_COLORES = {
   'Domingo': '#ec4899'
 };
 
+const startsToday = () => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+};
+
 const ProfesoresAsignaturas = ({ token }) => {
   const [asignaciones, setAsignaciones] = useState([]);
   const [profesores, setProfesores] = useState([]);
@@ -131,6 +147,14 @@ const ProfesoresAsignaturas = ({ token }) => {
   // Toast state
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const toastTimeout = useRef();
+
+  const today = useMemo(() => startsToday(), []);
+
+  const isPastAssignment = useCallback((assignment) => {
+    if (!assignment) return false;
+    const fin = parseDate(assignment.fecha_fin || assignment.fechaFin);
+    return fin ? fin < today : false;
+  }, [today]);
 
   // Toast helpers
   const showToast = (message, type = 'success') => {
@@ -294,7 +318,17 @@ const ProfesoresAsignaturas = ({ token }) => {
   };
 
   // Filtro y búsqueda
-  const asignacionesFiltradas = asignaciones.filter(a => {
+  const asignacionesActivas = useMemo(
+    () => asignaciones.filter((a) => !isPastAssignment(a)),
+    [asignaciones, isPastAssignment]
+  );
+
+  const asignacionesPasadas = useMemo(
+    () => asignaciones.filter((a) => isPastAssignment(a)),
+    [asignaciones, isPastAssignment]
+  );
+
+  const asignacionesFiltradas = asignacionesActivas.filter(a => {
     const matchSearch =
       a.profesor_nombre.toLowerCase().includes(search.toLowerCase()) ||
       a.curso_nombre.toLowerCase().includes(search.toLowerCase());
@@ -395,9 +429,12 @@ const ProfesoresAsignaturas = ({ token }) => {
                   <div className="rounded-circle p-2 me-3" style={{ backgroundColor: '#fae8ff' }}>
                     <Icons.Calendar />
                   </div>
-                  <h6 className="mb-0 text-secondary">Asignaciones</h6>
+                  <h6 className="mb-0 text-secondary">Asignaciones activas</h6>
                 </div>
-                <h3 className="mb-0 fw-bold">{asignaciones.length}</h3>
+                <div className="d-flex flex-column">
+                  <h3 className="mb-0 fw-bold">{asignacionesActivas.length}</h3>
+                  <small className="text-muted">{asignacionesPasadas.length} clases finalizadas</small>
+                </div>
               </div>
             </div>
           </div>

@@ -10,6 +10,7 @@ import {
   isVideoFile,
   buildGoogleMapsUrl
 } from '../utils/helpers';
+import UserAvatar from '../../components/UserAvatar';
 import '../styles/MessageList.css';
 
 /**
@@ -255,11 +256,13 @@ const MessageList = ({ messages, currentUserId, onEditMessage, onDeleteMessage }
         onContextMenu={(e) => handleContextMenu(e, message)}
       >
         {!isOwn && (
-          <div 
-            className="message-avatar"
-            style={{ backgroundColor: avatarColor }}
-          >
-            {initials}
+          <div className="message-avatar">
+            <UserAvatar 
+              userId={message.sender_id}
+              nombre={initials}
+              size="sm"
+              className="rounded-full"
+            />
           </div>
         )}
 

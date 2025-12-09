@@ -35,7 +35,7 @@ const LoginPage = () => {
 
     const role = String(user.rol || '').toLowerCase();
     if (role === 'admin' || role === 'administrativo') {
-      navigate('/admin', { replace: true });
+      navigate('/admin?module=usuarios-incompletos', { replace: true });
       return;
     }
     if (role === 'profesor' || role === 'docente') {

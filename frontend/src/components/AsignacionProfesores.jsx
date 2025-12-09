@@ -24,6 +24,12 @@ const diasSemana = [
 
 const nivelesAcademicos = ['Inicial', 'Primaria', 'Secundaria'];
 
+const getToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
 const AsignacionProfesores = ({
   profesores = [],
   cursos = [],
@@ -86,6 +92,13 @@ const AsignacionProfesores = ({
     // Validaciones de fechas
     if (f.fechaInicio && f.fechaFin && new Date(f.fechaFin) < new Date(f.fechaInicio)) {
       e.fechaFin = 'La fecha de fin debe ser posterior a la fecha de inicio';
+    }
+
+    if (f.fechaFin) {
+      const finDate = new Date(f.fechaFin);
+      if (!Number.isNaN(finDate.getTime()) && finDate < getToday()) {
+        e.fechaFin = 'No puedes asignar un profesor a una clase que ya finalizó';
+      }
     }
     
     // Validaciones de horas

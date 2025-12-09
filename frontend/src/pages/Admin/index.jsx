@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/ui';
 import useDashboardData from '../../hooks/useDashboardData';
 import AdminDashboard from '../../admin/dashboard.jsx';

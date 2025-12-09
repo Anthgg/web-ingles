@@ -8,6 +8,7 @@ import {
   isVideoFile,
   isAdminRoleName
 } from '../utils/helpers';
+import UserAvatar from '../../components/UserAvatar';
 import '../styles/UserInfo.css';
 
 /**
@@ -197,7 +198,6 @@ const UserInfo = ({
       <div className="user-info-profile">
         <div 
           className="user-info-avatar"
-          style={{ backgroundColor: hasGroupPhoto ? 'transparent' : avatarColor }}
         >
           {hasGroupPhoto ? (
             <img 
@@ -211,8 +211,17 @@ const UserInfo = ({
                 e.target.parentElement.innerHTML = `<span style="font-size: 36px; font-weight: 600; color: white;">${initials}</span>`;
               }}
             />
+          ) : currentRoom?.type === 'private' && otherUser ? (
+            <UserAvatar 
+              userId={otherUser.userId}
+              nombre={displayName}
+              tieneFoto={otherUser.tieneFotoPerfil === 1 || otherUser.tieneFotoPerfil === true}
+              size="2xl"
+            />
           ) : (
-            initials
+            <div style={{ backgroundColor: avatarColor, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontSize: '36px', fontWeight: '600', color: 'white' }}>
+              {initials}
+            </div>
           )}
         </div>
         
@@ -277,11 +286,13 @@ const UserInfo = ({
 
               return (
                 <div key={index} className="user-info-participant-item">
-                  <div 
-                    className="user-info-participant-avatar"
-                    style={{ backgroundColor: participantColor }}
-                  >
-                    {participantInitials}
+                  <div className="user-info-participant-avatar">
+                    <UserAvatar 
+                      userId={participant.userId}
+                      nombre={participantName}
+                      tieneFoto={participant.tieneFotoPerfil === 1 || participant.tieneFotoPerfil === true}
+                      size="md"
+                    />
                   </div>
                   <div className="user-info-participant-info">
                     <span className="user-info-participant-name">
@@ -475,11 +486,13 @@ const UserInfo = ({
                         className={`add-participants-item ${isSelected ? 'selected' : ''}`}
                         onClick={() => handleToggleContact(contact.id)}
                       >
-                        <div 
-                          className="add-participants-avatar"
-                          style={{ backgroundColor: contactColor }}
-                        >
-                          {contactInitials}
+                        <div className="add-participants-avatar">
+                          <UserAvatar 
+                            userId={contact.id}
+                            nombre={contactName}
+                            tieneFoto={contact.tiene_foto_perfil === 1 || contact.tiene_foto_perfil === true}
+                            size="md"
+                          />
                         </div>
                         <div className="add-participants-info">
                           <span className="add-participants-name">{contactName}</span>

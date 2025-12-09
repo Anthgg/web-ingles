@@ -103,9 +103,9 @@ const classesPool = mysql.createPool({
 const stripDiacritics = (value) =>
   typeof value === 'string'
     ? value
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
     : value;
 
 const normalizeDateOnly = (value) => {
@@ -119,6 +119,23 @@ const normalizeDateOnly = (value) => {
   }
   return String(value).slice(0, 10);
 };
+
+const normalizeAttendanceRow = (row) => {
+  if (!row) return row;
+  const normalized = { ...row };
+  if (normalized.fecha) {
+    normalized.fecha = normalizeDateOnly(normalized.fecha);
+  }
+  if (normalized.fecha_modificacion) {
+    const parsed = new Date(normalized.fecha_modificacion);
+    normalized.fecha_modificacion = Number.isNaN(parsed.getTime())
+      ? normalizeDateOnly(normalized.fecha_modificacion)
+      : parsed.toISOString();
+  }
+  return normalized;
+};
+
+const mapAttendanceRows = (rows = []) => rows.map((row) => normalizeAttendanceRow(row));
 
 const normalizeLevelKey = (value) =>
   typeof value === 'string' ? stripDiacritics(value).toLowerCase() : value;
@@ -195,9 +212,9 @@ const getClassroomLevelMetadata = async () => {
       const enumMatch = columnType.match(/^enum\((.*)\)$/i);
       const extracted = enumMatch
         ? enumMatch[1]
-            .split(',')
-            .map((item) => item.trim().replace(/^'(.*)'$/, '$1'))
-            .filter(Boolean)
+          .split(',')
+          .map((item) => item.trim().replace(/^'(.*)'$/, '$1'))
+          .filter(Boolean)
         : [];
 
       const allowedLevels = extracted.length ? extracted : fallbackLevels;
@@ -242,8 +259,8 @@ const resolveOrCreateClassroom = async ({ classroom_id, level, grade_number, sec
     typeof baseLevel === 'string' ? baseLevel.toLowerCase() : null,
     typeof baseLevel === 'string'
       ? baseLevel
-          .toLowerCase()
-          .replace(/(^|\s)\S/g, (t) => t.toUpperCase())
+        .toLowerCase()
+        .replace(/(^|\s)\S/g, (t) => t.toUpperCase())
       : null,
   ].filter(Boolean);
 
@@ -352,6 +369,101 @@ const normalizeRole = (value) => {
     return 'estudiante';
   }
   return normalized;
+};
+
+const parseLimit = (value, { min = 10, max = 500, fallback = 150 } = {}) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  const bounded = Math.trunc(parsed);
+  return Math.min(Math.max(bounded, min), max);
+};
+
+const toSafeDateFilter = (value) => {
+  if (!value) return null;
+  const normalized = normalizeDateOnly(value);
+  return normalized || null;
+};
+
+const getStudentAttendanceHistory = async ({ estudianteId, filters = {} }) => {
+  const numericId = Number(estudianteId);
+  if (!Number.isFinite(numericId)) {
+    const err = new Error('estudianteId invalido');
+    err.status = 400;
+    throw err;
+  }
+
+  const {
+    estado,
+    desde,
+    hasta,
+    cursoId,
+    asignacionId,
+    materiaId,
+    limit,
+  } = filters;
+
+  const params = [numericId];
+  let query =
+    `SELECT id,
+            estudiante_id,
+            estudiante_nombre,
+            materia_id,
+            estado,
+            fecha,
+            profesor_id,
+            asignacion_id,
+            curso_id,
+            curso_nombre,
+            observaciones,
+            modificado_por,
+            fecha_modificacion,
+            bloqueado
+       FROM asistencias
+      WHERE estudiante_id = ?`;
+
+  const normalizedEstado = typeof estado === 'string' ? estado.trim().toLowerCase() : null;
+  if (normalizedEstado) {
+    query += ' AND estado = ?';
+    params.push(normalizedEstado);
+  }
+
+  const normalizedDesde = toSafeDateFilter(desde);
+  if (normalizedDesde) {
+    query += ' AND DATE(fecha) >= ?';
+    params.push(normalizedDesde);
+  }
+
+  const normalizedHasta = toSafeDateFilter(hasta);
+  if (normalizedHasta) {
+    query += ' AND DATE(fecha) <= ?';
+    params.push(normalizedHasta);
+  }
+
+  const normalizedCursoId = toNumericOrNull(cursoId);
+  if (normalizedCursoId != null) {
+    query += ' AND curso_id = ?';
+    params.push(normalizedCursoId);
+  }
+
+  const normalizedAsignacionId = toNumericOrNull(asignacionId);
+  if (normalizedAsignacionId != null) {
+    query += ' AND asignacion_id = ?';
+    params.push(normalizedAsignacionId);
+  }
+
+  const normalizedMateriaId = toNumericOrNull(materiaId);
+  if (normalizedMateriaId != null) {
+    query += ' AND materia_id = ?';
+    params.push(normalizedMateriaId);
+  }
+
+  query += ' ORDER BY fecha DESC, id DESC LIMIT ?';
+  params.push(parseLimit(limit));
+
+  const [rows] = await pool.execute(query, params);
+  return mapAttendanceRows(rows);
 };
 
 const authMiddleware = (allowedRoles = []) => (req, res, next) => {
@@ -475,7 +587,19 @@ app.get(
   '/asistencias',
   authMiddleware(['administrativo']),
   asyncHandler(async (req, res) => {
-    const [rows] = await pool.query(
+    const {
+      estado,
+      estudianteId,
+      cursoId,
+      asignacionId,
+      materiaId,
+      desde,
+      hasta,
+      limit,
+    } = req.query;
+
+    const params = [];
+    let query =
       `SELECT id,
               estudiante_id,
               estudiante_nombre,
@@ -491,9 +615,59 @@ app.get(
               fecha_modificacion,
               bloqueado
          FROM asistencias
-        ORDER BY fecha DESC, id DESC`
-    );
-    res.json(rows);
+        WHERE 1 = 1`;
+
+    const normalizedEstado = typeof estado === 'string' ? estado.trim().toLowerCase() : null;
+    if (normalizedEstado) {
+      query += ' AND estado = ?';
+      params.push(normalizedEstado);
+    }
+
+    const normalizedEstudianteId = toNumericOrNull(estudianteId);
+    if (normalizedEstudianteId != null) {
+      query += ' AND estudiante_id = ?';
+      params.push(normalizedEstudianteId);
+    }
+
+    const normalizedCursoId = toNumericOrNull(cursoId);
+    if (normalizedCursoId != null) {
+      query += ' AND curso_id = ?';
+      params.push(normalizedCursoId);
+    }
+
+    const normalizedAsignacionId = toNumericOrNull(asignacionId);
+    if (normalizedAsignacionId != null) {
+      query += ' AND asignacion_id = ?';
+      params.push(normalizedAsignacionId);
+    }
+
+    const normalizedMateriaId = toNumericOrNull(materiaId);
+    if (normalizedMateriaId != null) {
+      query += ' AND materia_id = ?';
+      params.push(normalizedMateriaId);
+    }
+
+    const normalizedDesde = toSafeDateFilter(desde);
+    if (normalizedDesde) {
+      query += ' AND DATE(fecha) >= ?';
+      params.push(normalizedDesde);
+    }
+
+    const normalizedHasta = toSafeDateFilter(hasta);
+    if (normalizedHasta) {
+      query += ' AND DATE(fecha) <= ?';
+      params.push(normalizedHasta);
+    }
+
+    query += ' ORDER BY fecha DESC, id DESC';
+
+    if (limit !== undefined) {
+      query += ' LIMIT ?';
+      params.push(parseLimit(limit, { min: 50, max: 5000, fallback: 1000 }));
+    }
+
+    const [rows] = await pool.execute(query, params);
+    res.json(mapAttendanceRows(rows));
   })
 );
 
@@ -540,6 +714,30 @@ app.get(
 
     const [rows] = await pool.execute(query, params);
     res.json(rows);
+  })
+);
+
+app.get(
+  '/asistencias/estudiante/mias',
+  authMiddleware(['estudiante']),
+  asyncHandler(async (req, res) => {
+    const records = await getStudentAttendanceHistory({
+      estudianteId: req.user.id,
+      filters: req.query,
+    });
+    res.json(records);
+  })
+);
+
+app.get(
+  '/asistencias/estudiante/:id',
+  authMiddleware(['administrativo']),
+  asyncHandler(async (req, res) => {
+    const records = await getStudentAttendanceHistory({
+      estudianteId: req.params.id,
+      filters: req.query,
+    });
+    res.json(records);
   })
 );
 
@@ -605,8 +803,8 @@ app.post(
       return res.status(400).json({ error: 'Faltan datos obligatorios' });
     }
 
-  const normalizedEstado = String(estado).trim().toLowerCase();
-  const attendanceDate = normalizeDateOnly(fecha) || new Date().toISOString().slice(0, 10);
+    const normalizedEstado = String(estado).trim().toLowerCase();
+    const attendanceDate = normalizeDateOnly(fecha) || new Date().toISOString().slice(0, 10);
     const targetProfesorId = req.user.rol === 'profesor' ? req.user.id : profesorId;
 
     if (!targetProfesorId) {
@@ -619,19 +817,20 @@ app.post(
         `SELECT fn_es_dia_valido_curso(?, ?) AS es_valido`,
         [curso_id, attendanceDate]
       );
-      
+
       const esValido = validacionResult[0].es_valido === 1;
-      
+
       // Solo validar si el curso tiene horarios configurados
       const [horariosExist] = await classesPool.execute(
         `SELECT COUNT(*) as count FROM horarios_curso WHERE curso_id = ? AND activo = TRUE`,
         [curso_id]
       );
-      
+
       if (horariosExist[0].count > 0 && !esValido) {
-        return res.status(400).json({ 
-          error: 'Esta fecha no corresponde a un día de clase de este curso' 
-        });
+        // return res.status(400).json({ 
+        //   error: 'Esta fecha no corresponde a un día de clase de este curso' 
+        // });
+        console.warn(`[Attendance] Advertencia: La fecha ${attendanceDate} no es válida según fn_es_dia_valido_curso para curso ${curso_id}, pero se permite guardar.`);
       }
     }
 
@@ -964,7 +1163,7 @@ app.put(
       estudiante_nombre: nextEstudianteNombre,
       materia_id: nextMateriaId,
       estado: nextEstado,
-  fecha: normalizedFecha,
+      fecha: normalizedFecha,
       profesor_id: existing.profesor_id,
       asignacion_id: nextAsignacionId,
       curso_id: nextCursoId,
@@ -1032,7 +1231,7 @@ app.get(
   authMiddleware(['administrativo', 'profesor', 'estudiante']),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    
+
     // Validar acceso: estudiantes solo pueden ver sus propias estadísticas
     if (req.user.rol === 'estudiante' && parseInt(id) !== req.user.id) {
       return res.status(403).json({ error: 'No tienes permiso para ver estas estadísticas' });

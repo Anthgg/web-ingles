@@ -1,15 +1,24 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { 
   FaUser, FaClipboardCheck, FaGraduationCap, FaSignOutAlt,
-  FaBookOpen, FaBell, FaCog, FaMoon, FaSun, FaChevronLeft,
-  FaBars, FaAdjust, FaFilter, FaSearch,
+  FaBookOpen, FaCog, FaMoon, FaSun, FaChevronLeft, FaChevronRight,
+  FaBars, FaAdjust, FaFilter, FaSearch, FaArrowRight,
   FaRegBell, FaTimes, FaCheck, FaCalendarAlt, FaChartLine,
-  FaTrophy, FaPlus, FaSync, FaIdBadge, FaHome
+  FaTrophy, FaSync, FaHome, FaClock, FaInfoCircle, FaUsers, FaStar
 } from 'react-icons/fa';
-import Configuracion from '../components/Configuracion';
+import UserAvatar from '../components/UserAvatar';
+import ConfiguracionEstudiante from './ConfiguracionEstudiante';
 import { Chat } from '../chat';
-import StudentInternalForm from '../components/StudentInternalForm';
+import EstudianteDashboardLayout from './EstudianteDashboardLayout';
+
+const ASISTENCIA_ESTADO_CONFIG = {
+  presente: { label: 'Presentes', color: '#10b981', bg: 'rgba(16, 185, 129, 0.12)', icon: FaCheck },
+  ausente: { label: 'Ausentes', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.12)', icon: FaTimes },
+  justificado: { label: 'Justificados', color: '#f97316', bg: 'rgba(249, 115, 22, 0.12)', icon: FaClipboardCheck },
+  tardanza: { label: 'Tardanzas', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.12)', icon: FaClock },
+  default: { label: 'Sin clasificar', color: '#6b7280', bg: 'rgba(107, 114, 128, 0.12)', icon: FaInfoCircle },
+};
 
 const StudentDashboard = ({
   userInfo,
@@ -23,13 +32,9 @@ const StudentDashboard = ({
   setSuccess,
   misAsistencias = [],
   misCalificaciones = [],
-  misClases = [],
   misCursos = [],
-  cursosDisponibles = [],
   fetchMisCursos = () => {},
-  fetchCursosDisponibles = () => {},
-  onInscribirseCurso,
-  onCancelarInscripcionCurso,
+  fetchMisAsistencias = () => {},
   token,
   showError,
   showSuccess
@@ -38,40 +43,285 @@ const StudentDashboard = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 1024);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [enrollingId, setEnrollingId] = useState(null);
-  const [droppingId, setDroppingId] = useState(null);
+  const [claseSeleccionada, setClaseSeleccionada] = useState(null);
+  const [showDetalleModal, setShowDetalleModal] = useState(false);
   const [refreshingCursos, setRefreshingCursos] = useState(false);
+  const [refreshingAsistencias, setRefreshingAsistencias] = useState(false);
+  const [asistenciaEstadoFiltro, setAsistenciaEstadoFiltro] = useState('todos');
+  const [rangoAsistencia, setRangoAsistencia] = useState('30');
   const { isDark: darkMode, toggleTheme, highContrast, toggleHighContrast } = useTheme();
 
-  const cursosInscritos = Array.isArray(misCursos) && misCursos.length ? misCursos : misClases;
-  const disponibles = Array.isArray(cursosDisponibles) ? cursosDisponibles : [];
+  const cursosInscritos = Array.isArray(misCursos) ? misCursos : [];
   const totalCursosInscritos = cursosInscritos.length;
+
+  const parseFecha = (valor) => {
+    if (!valor) return null;
+    const parsed = new Date(valor);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const formatFechaLarga = (valor) => {
+    const parsed = parseFecha(valor);
+    if (!parsed) return 'Fecha sin registro';
+    return parsed.toLocaleDateString('es-ES', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+  };
+
+  const formatFechaCorta = (valor) => {
+    const parsed = parseFecha(valor);
+    if (!parsed) return 'N/D';
+    return parsed.toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const formatFechaHora = (valor) => {
+    const parsed = parseFecha(valor);
+    if (!parsed) return null;
+    return parsed.toLocaleString('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const asistenciasOrdenadas = useMemo(() => {
+    const origen = Array.isArray(misAsistencias) ? misAsistencias : [];
+    return [...origen].sort((a, b) => {
+      const dateA = parseFecha(a?.fecha) || 0;
+      const dateB = parseFecha(b?.fecha) || 0;
+      return dateB - dateA;
+    });
+  }, [misAsistencias]);
+
+  const resumenEstados = useMemo(() => {
+    const base = Object.keys(ASISTENCIA_ESTADO_CONFIG).reduce((acc, key) => {
+      if (key !== 'default') acc[key] = 0;
+      return acc;
+    }, {});
+
+    return asistenciasOrdenadas.reduce((acc, asistencia) => {
+      const key = String(asistencia?.estado || '').toLowerCase();
+      if (acc[key] === undefined) {
+        acc[key] = 0;
+      }
+      acc[key] += 1;
+      return acc;
+    }, base);
+  }, [asistenciasOrdenadas]);
+
+  const asistenciaPorcentaje = useMemo(() => {
+    if (!asistenciasOrdenadas.length) return 0;
+    const presentes = asistenciasOrdenadas.filter(
+      (registro) => String(registro.estado).toLowerCase() === 'presente'
+    ).length;
+    return Math.round((presentes / asistenciasOrdenadas.length) * 100);
+  }, [asistenciasOrdenadas]);
+
+  const filteredAsistencias = useMemo(() => {
+    const limiteDias = rangoAsistencia === 'all' ? null : Number(rangoAsistencia);
+    const filtroEstado = asistenciaEstadoFiltro === 'todos' ? null : asistenciaEstadoFiltro;
+
+    return asistenciasOrdenadas.filter((registro) => {
+      const registroEstado = String(registro.estado || '').toLowerCase();
+      if (filtroEstado && registroEstado !== filtroEstado) {
+        return false;
+      }
+
+      if (limiteDias) {
+        const fechaRegistro = parseFecha(registro.fecha);
+        if (!fechaRegistro) return false;
+        const limite = new Date();
+        limite.setDate(limite.getDate() - limiteDias);
+        if (fechaRegistro < limite) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [asistenciasOrdenadas, asistenciaEstadoFiltro, rangoAsistencia]);
+
+  const ultimasAsistencias = useMemo(() => filteredAsistencias.slice(0, 25), [filteredAsistencias]);
+
+  const coalesce = (...values) => {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== '') {
+        return value;
+      }
+    }
+    return null;
+  };
+
+  const firstCourse = Array.isArray(userInfo?.datosCompletos?.cursos) && userInfo.datosCompletos.cursos.length > 0
+    ? userInfo.datosCompletos.cursos.find(Boolean)
+    : null;
+
+  const studentLevel = coalesce(
+    userInfo?.nivel_estudiante,
+    userInfo?.nivel,
+    userInfo?.level,
+    userInfo?.datosCompletos?.level,
+    userInfo?.datosCompletos?.nivel,
+    userInfo?.datosCompletos?.estudiante?.level,
+    userInfo?.datosCompletos?.estudiante?.nivel,
+    userInfo?.datosCompletos?.estudiante?.nivel_estudiante,
+    userInfo?.datosCompletos?.basicos?.level,
+    userInfo?.datosCompletos?.basicos?.nivel,
+    userInfo?.datosCompletos?.basicos?.nivel_estudiante,
+    firstCourse?.level,
+    firstCourse?.nivel,
+    firstCourse?.nivel_academico,
+    firstCourse?.level_name
+  );
+
+  const rawGrade = coalesce(
+    userInfo?.grado_estudiante,
+    userInfo?.grado,
+    userInfo?.grade_number,
+    userInfo?.datosCompletos?.grade_number,
+    userInfo?.datosCompletos?.grado,
+    userInfo?.datosCompletos?.estudiante?.grade_number,
+    userInfo?.datosCompletos?.estudiante?.grado,
+    userInfo?.datosCompletos?.estudiante?.grado_estudiante,
+    userInfo?.datosCompletos?.basicos?.grade_number,
+    userInfo?.datosCompletos?.basicos?.grado,
+    userInfo?.datosCompletos?.basicos?.grado_estudiante,
+    firstCourse?.grade_number,
+    firstCourse?.grado,
+    firstCourse?.grade,
+    firstCourse?.gradeNumber
+  );
+
+  const studentGrade = rawGrade !== undefined && rawGrade !== null && rawGrade !== '' ? rawGrade : null;
+  const studentGradeDisplay = studentGrade != null ? String(studentGrade) : null;
+
+  const studentSection = coalesce(
+    userInfo?.section,
+    userInfo?.seccion,
+    userInfo?.datosCompletos?.section,
+    userInfo?.datosCompletos?.seccion,
+    userInfo?.datosCompletos?.estudiante?.section,
+    userInfo?.datosCompletos?.estudiante?.seccion,
+    userInfo?.datosCompletos?.estudiante?.grupo,
+    userInfo?.datosCompletos?.basicos?.section,
+    userInfo?.datosCompletos?.basicos?.seccion,
+    userInfo?.datosCompletos?.basicos?.grupo,
+    firstCourse?.section,
+    firstCourse?.seccion,
+    firstCourse?.grupo
+  );
 
   // Menu items para estudiante
   const menuItems = [
     {
       category: 'Mi Aprendizaje',
       items: [
-        { id: 'dashboard', label: 'Panel Principal', icon: FaHome, module: null },
-        { id: 'mis-clases', label: 'Mis Clases', icon: FaBookOpen, module: 'mis-clases' },
-        { id: 'seleccionar-curso', label: 'Inscribir Cursos', icon: FaPlus, module: 'seleccionar-curso' },
+        { id: 'dashboard', label: 'Panel Principal', icon: FaHome, module: null, helper: 'Vista general', description: 'Resumen de tu progreso académico' },
+        { id: 'mis-clases', label: 'Mis Clases', icon: FaBookOpen, module: 'mis-clases', helper: 'Cursos activos', description: 'Gestiona tus cursos asignados' },
       ]
     },
     {
       category: 'Mi Rendimiento',
       items: [
-        { id: 'mis-asistencias', label: 'Mis Asistencias', icon: FaClipboardCheck, module: 'mis-asistencias' },
-        { id: 'mis-calificaciones', label: 'Mis Calificaciones', icon: FaTrophy, module: 'mis-calificaciones' },
+        { id: 'mis-asistencias', label: 'Mis Asistencias', icon: FaClipboardCheck, module: 'mis-asistencias', helper: 'Historial completo', description: 'Revisa tu registro de asistencias' },
+        { id: 'mis-calificaciones', label: 'Mis Calificaciones', icon: FaTrophy, module: 'mis-calificaciones', helper: 'Notas y promedios', description: 'Consulta tus calificaciones' },
       ]
     },
     {
       category: 'Otros',
       items: [
-        { id: 'chat', label: 'Mensajería', icon: FaRegBell, module: 'chat' },
-        { id: 'configuracion', label: 'Configuración', icon: FaCog, module: 'configuracion' },
+        { id: 'chat', label: 'Mensajería', icon: FaRegBell, module: 'chat', helper: 'Comunicación', description: 'Mensajes con profesores' },
+        { id: 'configuracion', label: 'Configuración', icon: FaCog, module: 'configuracion', helper: 'Preferencias', description: 'Ajusta tu perfil y cuenta' },
       ]
     }
   ];
+
+  // Función para calcular promedio (declarada antes de usarla en studentStats)
+  const calcularPromedioValue = useMemo(() => {
+    if (misCalificaciones.length === 0) return "N/A";
+    const suma = misCalificaciones.reduce((acc, cal) => acc + cal.nota, 0);
+    return (suma / misCalificaciones.length).toFixed(1);
+  }, [misCalificaciones]);
+
+  // Estadísticas del estudiante
+  const studentStats = [
+    {
+      label: 'Cursos Activos',
+      value: totalCursosInscritos,
+      helper: 'Asignados actualmente',
+      icon: FaBookOpen,
+      color: '#10b981',
+      gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+    },
+    {
+      label: 'Asistencia General',
+      value: `${asistenciaPorcentaje}%`,
+      helper: 'Promedio registrado',
+      icon: FaClipboardCheck,
+      color: '#06b6d4',
+      gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+    },
+    {
+      label: 'Promedio General',
+      value: calcularPromedioValue,
+      helper: 'Del semestre actual',
+      icon: FaTrophy,
+      color: '#f59e0b',
+      gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+    },
+    {
+      label: 'Nivel Académico',
+      value: studentLevel || 'N/A',
+      helper: 'Asignado por la escuela',
+      icon: FaGraduationCap,
+      color: '#8b5cf6',
+      gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+    },
+  ];
+
+  // Quick actions para estudiante
+  const categories = menuItems;
+  const flattenedMenu = categories.flatMap((category) =>
+    (category.items || []).map((item) => ({
+      ...item,
+      category: category.category,
+    })),
+  );
+  const quickActionItems = flattenedMenu.slice(0, 4);
+
+  // Module cards para el dashboard
+  const moduleCards = categories.map((category) => ({
+    title: category.category,
+    items: (category.items || []).map((item) => ({
+      ...item,
+      description: item.description || 'Explora opciones del módulo',
+    })),
+  }));
+
+  // Greeting basado en la hora
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [greeting, setGreeting] = useState('');
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const hour = currentTime.getHours();
+    if (hour < 12) setGreeting('Buenos días');
+    else if (hour < 18) setGreeting('Buenas tardes');
+    else setGreeting('Buenas noches');
+  }, [currentTime]);
 
   const handleModuleChange = useCallback((module) => {
     try {
@@ -86,21 +336,7 @@ const StudentDashboard = ({
     if (fetchMisCursos) {
       fetchMisCursos(true);
     }
-    if (fetchCursosDisponibles) {
-      fetchCursosDisponibles(true);
-    }
-  }, [fetchMisCursos, fetchCursosDisponibles]);
-
-  useEffect(() => {
-    if (activeModule === 'seleccionar-curso') {
-      if (fetchMisCursos) {
-        fetchMisCursos(true);
-      }
-      if (fetchCursosDisponibles) {
-        fetchCursosDisponibles(true);
-      }
-    }
-  }, [activeModule, fetchMisCursos, fetchCursosDisponibles]);
+  }, [fetchMisCursos]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -115,62 +351,139 @@ const StudentDashboard = ({
   }, []);
 
   const handleRefreshCursos = async () => {
-    if (!fetchMisCursos && !fetchCursosDisponibles) {
+    if (!fetchMisCursos) {
       return;
     }
     setRefreshingCursos(true);
     try {
-      if (fetchMisCursos) {
-        await fetchMisCursos(true);
-      }
-      if (fetchCursosDisponibles) {
-        await fetchCursosDisponibles(true);
-      }
+      await fetchMisCursos(true);
     } finally {
       setRefreshingCursos(false);
     }
   };
 
-  const handleInscribirse = async (asignacionId) => {
-    if (!onInscribirseCurso) return;
-    setEnrollingId(asignacionId);
+  const handleRefreshAsistencias = async () => {
+    if (!fetchMisAsistencias) {
+      return;
+    }
+    setRefreshingAsistencias(true);
     try {
-      await onInscribirseCurso(asignacionId);
+      const filters = {};
+      if (asistenciaEstadoFiltro !== 'todos') {
+        filters.estado = asistenciaEstadoFiltro;
+      }
+      if (rangoAsistencia !== 'all') {
+        const dias = Number(rangoAsistencia);
+        if (Number.isFinite(dias) && dias > 0) {
+          const desde = new Date();
+          desde.setDate(desde.getDate() - dias);
+          filters.desde = desde.toISOString().slice(0, 10);
+        }
+      }
+      filters.limit = 400;
+      await fetchMisAsistencias(true, filters);
+      showSuccess && showSuccess('Asistencias sincronizadas con el backend');
+    } catch (err) {
+      console.error('Error al refrescar asistencias:', err);
+      showError && showError('No se pudo actualizar tu historial de asistencias');
     } finally {
-      setEnrollingId(null);
+      setRefreshingAsistencias(false);
     }
   };
 
-  const handleCancelarInscripcion = async (asignacionId) => {
-    if (!onCancelarInscripcionCurso) return;
-    setDroppingId(asignacionId);
-    try {
-      await onCancelarInscripcionCurso(asignacionId);
-    } finally {
-      setDroppingId(null);
-    }
-  };
+  const calcularPromedio = () => calcularPromedioValue;
 
-  const calcularPromedio = () => {
-    if (misCalificaciones.length === 0) return "N/A";
-    const suma = misCalificaciones.reduce((acc, cal) => acc + cal.nota, 0);
-    return (suma / misCalificaciones.length).toFixed(1);
-  };
-
-  const calcularAsistencia = () => {
-    if (misAsistencias.length === 0) return "0%";
-    const presentes = misAsistencias.filter(a => a.presente).length;
-    return Math.round((presentes / misAsistencias.length) * 100) + "%";
-  };
+  const calcularAsistencia = () => `${asistenciaPorcentaje}%`;
 
   const resolverCursoId = (curso = {}) => curso.asignacionId ?? curso.id ?? curso.cursoId ?? curso.materiaId ?? curso.codigo;
   const resolverNombreCurso = (curso = {}) => curso.curso_nombre ?? curso.nombreCurso ?? curso.nombre ?? curso.curso ?? curso.titulo ?? 'Curso sin título';
   const resolverDocenteCurso = (curso = {}) => curso.profesor_nombre ?? curso.docenteNombre ?? curso.profesor ?? curso.docente ?? curso.maestro ?? curso.teacher ?? 'Docente no asignado';
 
+  const obtenerNombreDia = (diaNum) => {
+    const dias = {
+      1: 'Lunes',
+      2: 'Martes',
+      3: 'Miércoles',
+      4: 'Jueves',
+      5: 'Viernes',
+      6: 'Sábado',
+      7: 'Domingo'
+    };
+    return dias[diaNum] || 'No definido';
+  };
+
+  const formatearHora = (hora) => {
+    if (!hora) return '';
+    // Si ya viene en formato HH:MM o HH:MM:SS
+    if (typeof hora === 'string') {
+      // Extraer solo HH:MM
+      const match = hora.match(/^(\d{1,2}):(\d{2})/);
+      if (match) {
+        const h = match[1].padStart(2, '0');
+        const m = match[2];
+        return `${h}:${m}`;
+      }
+    }
+    return String(hora);
+  };
+
+  const resolverHorario = (curso = {}) => {
+    const diaSemana = curso.dia_semana ?? curso.diaSemana;
+    const horaInicio = curso.hora_inicio ?? curso.horaInicio;
+    const horaFin = curso.hora_fin ?? curso.horaFin;
+
+    if (!diaSemana || !horaInicio || !horaFin) {
+      return 'Por definir';
+    }
+
+    // Si diaSemana ya es un nombre (string), usarlo directamente
+    const dia = typeof diaSemana === 'string' && isNaN(diaSemana) 
+      ? diaSemana 
+      : obtenerNombreDia(Number(diaSemana));
+    
+    const inicio = formatearHora(horaInicio);
+    const fin = formatearHora(horaFin);
+
+    return `${dia} ${inicio} - ${fin}`;
+  };
+
+  const formatearFecha = (fecha) => {
+    if (!fecha) return 'No definida';
+    try {
+      const date = new Date(fecha);
+      return date.toLocaleDateString('es-ES', { 
+        day: '2-digit', 
+        month: 'short', 
+        year: 'numeric' 
+      });
+    } catch {
+      return 'Fecha inválida';
+    }
+  };
+
+  const resolverFechas = (curso = {}) => {
+    const fechaInicio = curso.fecha_inicio ?? curso.fechaInicio;
+    const fechaFin = curso.fecha_fin ?? curso.fechaFin;
+    
+    const inicio = formatearFecha(fechaInicio);
+    const fin = formatearFecha(fechaFin);
+    
+    return { inicio, fin };
+  };
+
+  const handleVerDetalle = (curso) => {
+    setClaseSeleccionada(curso);
+    setShowDetalleModal(true);
+  };
+
+  const handleCerrarDetalle = () => {
+    setShowDetalleModal(false);
+    setTimeout(() => setClaseSeleccionada(null), 300);
+  };
+
   const getModuleTitle = (module) => {
     const titles = {
       'mis-clases': 'Mis Clases',
-      'seleccionar-curso': 'Inscribir en Cursos',
       'mis-asistencias': 'Mis Asistencias',
       'mis-calificaciones': 'Mis Calificaciones',
       'chat': 'Mensajería Interna',
@@ -182,13 +495,9 @@ const StudentDashboard = ({
   return (
     <>
       <style>{`
-        /* ========== ANIMACIONES ========== */
+        /* ========== ESTILOS ADICIONALES PARA CONTENIDO ========== */
         @keyframes slideInRight {
           from { opacity: 0; transform: translateX(30px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes slideInLeft {
-          from { opacity: 0; transform: translateX(-30px); }
           to { opacity: 1; transform: translateX(0); }
         }
         @keyframes scaleIn {
@@ -208,289 +517,36 @@ const StudentDashboard = ({
           50% { background-position: 100% 50%; }
           100% { background-position: 0% 50%; }
         }
-
-        /* ========== VARIABLES PARA ESTUDIANTE (AZUL) ========== */
-        :root {
-          --estudiante-primary: #3b82f6;
-          --estudiante-secondary: #2563eb;
-          --estudiante-dark: #1e40af;
-          --estudiante-light: #60a5fa;
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
         }
-
-        /* ========== DASHBOARD PRINCIPAL ========== */
-        .estudiante-dashboard {
-          min-height: 100vh;
-          background: var(--bg-secondary);
-          color: var(--text-primary);
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          animation: fadeIn 0.5s ease-out;
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
         }
-
-        /* ========== SIDEBAR ESTUDIANTE (AZUL) ========== */
-        .estudiante-sidebar {
-          background: linear-gradient(180deg, #1e40af 0%, #3b82f6 50%, #1e40af 100%);
-          background-size: 100% 200%;
-          border-right: 1px solid rgba(255, 255, 255, 0.1);
-          position: fixed;
-          top: 0;
-          left: 0;
-          height: 100vh;
-          z-index: 1000;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
-          overflow-y: auto;
-          overflow-x: hidden;
-          animation: slideInLeft 0.5s ease-out;
+        @keyframes rotate {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
-
-        .estudiante-sidebar::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: linear-gradient(180deg, 
-            rgba(59, 130, 246, 0.1) 0%, 
-            rgba(96, 165, 250, 0.05) 50%, 
-            rgba(59, 130, 246, 0.1) 100%);
-          opacity: 0;
-          transition: opacity 0.3s ease;
-          pointer-events: none;
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
-
-        .estudiante-sidebar:hover::before {
-          opacity: 1;
-        }
-
-        .sidebar-collapsed {
-          width: 80px !important;
-        }
-
-        .sidebar-collapsed .nav-text,
-        .sidebar-collapsed .category-title,
-        .sidebar-collapsed .user-details {
-          opacity: 0;
-          visibility: hidden;
-          width: 0;
-          overflow: hidden;
-        }
-
-        /* ========== NAVEGACIÓN ========== */
-        .category-title {
-          color: rgba(255, 255, 255, 0.5);
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin: 24px 0 12px 12px;
-          transition: all 0.3s ease;
-        }
-
-        .nav-link-estudiante {
-          display: flex;
-          align-items: center;
-          padding: 12px 16px;
-          margin: 4px 0;
-          border-radius: 12px;
-          color: rgba(255, 255, 255, 0.8);
-          text-decoration: none;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-          border: none;
-          background: transparent;
-          width: 100%;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .nav-link-estudiante::before {
-          content: '';
-          position: absolute;
-          left: 0;
-          top: 0;
-          bottom: 0;
-          width: 4px;
-          background: var(--estudiante-light);
-          transform: scaleY(0);
-          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .nav-link-estudiante:hover {
-          background: rgba(255, 255, 255, 0.1);
-          color: white;
-          transform: translateX(4px);
-        }
-
-        .nav-link-estudiante.active {
-          background: rgba(255, 255, 255, 0.15);
-          color: white;
-          font-weight: 600;
-          box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
-        }
-
-        .nav-link-estudiante.active::before {
-          transform: scaleY(1);
-        }
-
-        .nav-icon {
-          font-size: 18px;
-          transition: all 0.3s ease;
-          z-index: 1;
-        }
-
-        .nav-link-estudiante:hover .nav-icon {
-          transform: scale(1.2) rotate(5deg);
-        }
-
-        .nav-link-estudiante.active .nav-icon {
-          transform: scale(1.15);
-          filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
-        }
-
-        .icon-wrapper {
-          width: 20px;
-          height: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-
-        .nav-text {
-          margin-left: 12px;
-          white-space: nowrap;
-        }
-
-        /* ========== HEADER ========== */
-        .estudiante-header {
-          background: var(--bg-primary);
-          border-bottom: 1px solid var(--border-color);
-          padding: 16px 32px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-          position: static;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        /* ========== TARJETAS ========== */
-        .estudiante-card {
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
-          border-radius: 16px;
-          box-shadow: var(--shadow-md);
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          animation: scaleIn 0.5s ease-out;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .estudiante-card:hover {
-          transform: translateY(-4px) scale(1.01);
-          box-shadow: var(--shadow-xl);
-          border-color: var(--estudiante-primary);
-        }
-
-        /* ========== TARJETAS DE ESTADÍSTICAS ========== */
-        .stat-card-estudiante {
-          background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-tertiary) 100%);
-          border: 1px solid var(--border-color);
-          border-radius: 20px;
-          padding: 28px;
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          position: relative;
-          overflow: hidden;
-          animation: fadeInUp 0.6s ease-out backwards;
-        }
-
-        .stat-card-estudiante:nth-child(1) { animation-delay: 0.1s; }
-        .stat-card-estudiante:nth-child(2) { animation-delay: 0.2s; }
-        .stat-card-estudiante:nth-child(3) { animation-delay: 0.3s; }
-        .stat-card-estudiante:nth-child(4) { animation-delay: 0.4s; }
-
-        .stat-card-estudiante::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 5px;
-          background: linear-gradient(90deg, var(--estudiante-primary), var(--estudiante-light), var(--estudiante-primary));
-          background-size: 200% 100%;
-          animation: gradientFlow 3s ease infinite;
-        }
-
-        .stat-card-estudiante:hover {
-          transform: translateY(-8px);
-          box-shadow: 0 12px 32px rgba(59, 130, 246, 0.2);
-        }
-
-        /* ========== BOTONES DE ACCIÓN ========== */
-        .action-btn-estudiante {
-          width: 44px;
-          height: 44px;
-          border-radius: 12px;
-          border: 2px solid var(--border-color);
-          background: var(--bg-secondary);
-          color: var(--text-secondary);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .action-btn-estudiante:hover {
-          background: var(--bg-tertiary);
-          color: var(--estudiante-primary);
-          border-color: var(--estudiante-primary);
-          transform: scale(1.1) translateY(-2px);
-          box-shadow: 0 8px 16px rgba(59, 130, 246, 0.2);
-        }
-
-        /* ========== BÚSQUEDA ========== */
-        .search-input-estudiante {
-          background: var(--bg-secondary);
-          border: 2px solid var(--border-color);
-          border-radius: 12px;
-          padding: 12px 20px 12px 48px;
-          color: var(--text-primary);
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          width: 320px;
-          font-size: 0.95rem;
-        }
-
-        .search-input-estudiante:focus {
-          outline: none;
-          border-color: var(--estudiante-primary);
-          background: var(--bg-primary);
-          box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
-          transform: translateY(-2px);
-        }
-
-        /* ========== NOTIFICACIONES ========== */
-        .notification {
-          position: fixed;
-          top: 24px;
-          right: 24px;
-          z-index: 1050;
-          min-width: 350px;
-          border-radius: 16px;
-          backdrop-filter: blur(12px);
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
-          animation: slideInRight 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
         }
 
         /* ========== LOADING ========== */
-        .loading-overlay {
+        .loading-overlay-estudiante {
           position: fixed;
           top: 0;
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.15);
-          backdrop-filter: blur(4px);
+          background: rgba(0, 0, 0, 0.4);
+          backdrop-filter: blur(8px);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -501,707 +557,1291 @@ const StudentDashboard = ({
         .spinner-estudiante {
           width: 48px;
           height: 48px;
-          border: 4px solid var(--border-color);
-          border-top: 4px solid var(--estudiante-primary);
+          border: 4px solid rgba(16, 185, 129, 0.2);
+          border-top: 4px solid #10b981;
           border-radius: 50%;
           animation: spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
 
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
+        /* ========== NOTIFICACIONES ========== */
+        .notification-estudiante {
+          position: fixed;
+          top: 24px;
+          right: 24px;
+          z-index: 1050;
+          min-width: 350px;
+          border-radius: 16px;
+          backdrop-filter: blur(12px);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+          animation: slideInRight 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* ========== MENÚ DE USUARIO ========== */
-        .user-menu {
-          position: absolute;
-          top: calc(100% + 12px);
-          right: 0;
-          background: var(--bg-primary);
-          border: 2px solid var(--border-color);
+        /* ========== MIS CLASES CONTAINER ========== */
+        .mis-clases-container {
+          animation: fadeInUp 0.5s ease-out;
+        }
+
+        .mis-clases-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 2rem;
+          padding: 1.5rem;
+          background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(6, 182, 212, 0.1));
+          border-radius: 20px;
+          border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .header-info h3 {
+          font-size: 1.5rem;
+          font-weight: 700;
+          margin: 0 0 0.5rem 0;
+          color: #f0fdf4;
+        }
+
+        .header-info p {
+          margin: 0;
+          color: #86efac;
+          font-size: 0.95rem;
+        }
+
+        .btn-refresh-clases {
+          padding: 0.75rem 1.5rem;
+          background: linear-gradient(135deg, #10b981, #059669);
+          color: white;
+          border: none;
           border-radius: 12px;
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
-          min-width: 200px;
-          z-index: 1000;
-          animation: fadeInUp 0.3s ease;
-        }
-
-        /* ========== QUICK ACTIONS ========== */
-        .quick-action-estudiante {
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
-          border-radius: 16px;
-          padding: 24px;
-          text-align: center;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          cursor: pointer;
-        }
-
-        .quick-action-estudiante:hover {
-          transform: translateY(-8px);
-          box-shadow: 0 12px 32px rgba(59, 130, 246, 0.15);
-          border-color: var(--estudiante-primary);
-        }
-
-        /* ========== CURSO CARD ========== */
-        .curso-card {
-          background: var(--bg-primary);
-          border: 2px solid var(--border-color);
-          border-radius: 16px;
-          padding: 20px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
           transition: all 0.3s ease;
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-refresh-clases:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-refresh-clases:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+
+        .clases-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+          gap: 1.5rem;
+        }
+
+        /* ========== CLASE CARD ========== */
+        .clase-card {
+          background: linear-gradient(145deg, rgba(6, 78, 59, 0.5), rgba(6, 78, 59, 0.3));
+          border: 1px solid rgba(16, 185, 129, 0.2);
+          border-radius: 24px;
+          overflow: hidden;
+          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
+          animation: fadeInUp 0.5s ease-out backwards;
+        }
+
+        .clase-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 4px;
+          background: linear-gradient(90deg, #10b981, #06b6d4);
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        }
+
+        .clase-card:hover {
+          transform: translateY(-8px) scale(1.02);
+          box-shadow: 0 20px 40px rgba(16, 185, 129, 0.2);
+          border-color: rgba(16, 185, 129, 0.4);
+        }
+
+        .clase-card:hover::before {
+          opacity: 1;
+        }
+
+        .clase-card-header {
+          padding: 24px 24px 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+        }
+
+        .clase-icon-wrapper {
+          width: 60px;
+          height: 60px;
+          border-radius: 18px;
+          background: linear-gradient(135deg, #10b981, #059669);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-size: 1.5rem;
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+        }
+
+        .clase-status-badge {
+          padding: 6px 14px;
+          border-radius: 20px;
+          background: rgba(34, 197, 94, 0.15);
+          color: #22c55e;
+          font-size: 0.8rem;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #22c55e;
+          animation: pulse 2s ease-in-out infinite;
+        }
+
+        .clase-card-body {
+          padding: 0 24px 24px;
+        }
+
+        .clase-title {
+          font-size: 1.2rem;
+          font-weight: 700;
+          color: #f0fdf4;
+          margin-bottom: 20px;
+          line-height: 1.4;
+        }
+
+        .clase-info-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 12px;
+          padding: 12px;
+          border-radius: 12px;
+          background: rgba(16, 185, 129, 0.08);
+          transition: all 0.2s ease;
+        }
+
+        .clase-info-item:hover {
+          background: rgba(16, 185, 129, 0.15);
+          transform: translateX(4px);
+        }
+
+        .info-icon {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          background: rgba(16, 185, 129, 0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #10b981;
+          flex-shrink: 0;
+        }
+
+        .info-content {
+          flex: 1;
+        }
+
+        .info-label {
+          font-size: 0.75rem;
+          color: #86efac;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .info-value {
+          font-size: 0.9rem;
+          color: #f0fdf4;
+          font-weight: 500;
+        }
+
+        .clase-progress-section {
+          margin-top: 20px;
+          padding: 16px;
+          background: rgba(16, 185, 129, 0.1);
+          border-radius: 14px;
+          border: 1px solid rgba(16, 185, 129, 0.15);
+        }
+
+        .progress-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        .progress-text {
+          font-size: 0.85rem;
+          color: #86efac;
+        }
+
+        .progress-percent {
+          font-size: 1rem;
+          color: #10b981;
+          font-weight: 700;
+        }
+
+        .progress-bar-clase {
+          height: 8px;
+          background: rgba(16, 185, 129, 0.2);
+          border-radius: 999px;
+          overflow: hidden;
+        }
+
+        .progress-fill-clase {
           height: 100%;
+          background: linear-gradient(90deg, #10b981, #06b6d4);
+          border-radius: 999px;
+          position: relative;
+          overflow: hidden;
         }
 
-        .curso-card:hover {
+        .progress-fill-clase::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+          animation: shimmer 2s infinite;
+        }
+
+        .clase-card-footer {
+          padding: 16px 24px;
+          background: rgba(16, 185, 129, 0.05);
+          border-top: 1px solid rgba(16, 185, 129, 0.15);
+        }
+
+        .btn-ver-detalle {
+          width: 100%;
+          padding: 14px 20px;
+          border-radius: 14px;
+          background: linear-gradient(135deg, #10b981, #059669);
+          color: white;
+          font-weight: 600;
+          border: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.3s ease;
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+        }
+
+        .btn-ver-detalle:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.35);
+        }
+
+        /* ========== EMPTY STATE ========== */
+        .empty-state {
+          padding: 60px 20px;
+          text-align: center;
+          background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 182, 212, 0.05));
+          border-radius: 24px;
+          border: 2px dashed rgba(16, 185, 129, 0.3);
+        }
+
+        .empty-icon-wrapper {
+          width: 100px;
+          height: 100px;
+          margin: 0 auto 24px;
+          background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.15));
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #10b981;
+          font-size: 2.5rem;
+          position: relative;
+        }
+
+        .empty-icon-wrapper::before {
+          content: '';
+          position: absolute;
+          inset: -10px;
+          border-radius: 50%;
+          border: 2px dashed rgba(16, 185, 129, 0.3);
+          animation: rotate 20s linear infinite;
+        }
+
+        .empty-title {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #f0fdf4;
+          margin-bottom: 12px;
+        }
+
+        .empty-description {
+          color: #86efac;
+          margin-bottom: 0;
+          font-size: 1rem;
+        }
+
+        /* ========== ASISTENCIAS PANEL ========== */
+        .asistencias-container {
+          animation: fadeInUp 0.5s ease-out;
+        }
+
+        .asistencias-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 2rem;
+          padding: 1.5rem;
+          background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(6, 182, 212, 0.1));
+          border-radius: 20px;
+          border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .btn-sync-asistencia {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px 20px;
+          border-radius: 12px;
+          border: none;
+          background: linear-gradient(135deg, #10b981, #059669);
+          color: #fff;
+          font-weight: 600;
+          transition: all 0.3s ease;
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.25);
+        }
+
+        .btn-sync-asistencia:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+
+        .asistencias-filters {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+          padding: 20px;
+          background: rgba(16, 185, 129, 0.08);
+          border-radius: 16px;
+          border: 1px solid rgba(16, 185, 129, 0.15);
+          margin-bottom: 24px;
+        }
+
+        .filter-field label {
+          font-weight: 600;
+          color: #86efac;
+          font-size: 0.85rem;
+          display: block;
+          margin-bottom: 8px;
+        }
+
+        .filter-select {
+          width: 100%;
+          border-radius: 12px;
+          border: 1px solid rgba(16, 185, 129, 0.25);
+          outline: none;
+          padding: 12px;
+          background: rgba(6, 78, 59, 0.5);
+          color: #f0fdf4;
+          font-weight: 500;
+        }
+
+        .filter-select:focus {
+          border-color: #10b981;
+          box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+        }
+
+        .asistencias-summary {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+          gap: 16px;
+          margin-bottom: 24px;
+        }
+
+        .summary-card {
+          background: rgba(16, 185, 129, 0.08);
+          border: 1px solid rgba(16, 185, 129, 0.15);
+          border-radius: 16px;
+          padding: 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .summary-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .summary-info h4 {
+          margin: 0;
+          font-weight: 700;
+          font-size: 1.25rem;
+        }
+
+        .summary-info p {
+          margin: 0;
+          font-size: 0.8rem;
+          color: #86efac;
+        }
+
+        .asistencias-table {
+          background: rgba(6, 78, 59, 0.3);
+          border: 1px solid rgba(16, 185, 129, 0.15);
+          border-radius: 20px;
+          overflow: hidden;
+        }
+
+        .asistencia-row {
+          display: grid;
+          grid-template-columns: 150px 1.2fr auto 1fr;
+          gap: 16px;
+          padding: 20px;
+          border-bottom: 1px solid rgba(16, 185, 129, 0.1);
+          align-items: center;
+          transition: background 0.2s ease;
+        }
+
+        .asistencia-row:hover {
+          background: rgba(16, 185, 129, 0.05);
+        }
+
+        .asistencia-row:last-child {
+          border-bottom: none;
+        }
+
+        .date-large {
+          font-weight: 700;
+          font-size: 1rem;
+          color: #f0fdf4;
+        }
+
+        .date-sub {
+          font-size: 0.8rem;
+          color: #86efac;
+        }
+
+        .course-name {
+          margin: 0;
+          font-weight: 600;
+          color: #f0fdf4;
+        }
+
+        .course-meta {
+          margin: 4px 0 0;
+          font-size: 0.8rem;
+          color: #86efac;
+        }
+
+        .estado-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 14px;
+          border-radius: 999px;
+          font-weight: 600;
+          font-size: 0.85rem;
+        }
+
+        .asistencia-observaciones {
+          font-size: 0.9rem;
+          color: #86efac;
+        }
+
+        @media (max-width: 992px) {
+          .asistencia-row {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+
+          .mis-clases-header,
+          .asistencias-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+          }
+
+          .btn-refresh-clases,
+          .btn-sync-asistencia {
+            width: 100%;
+            justify-content: center;
+          }
+
+          .clases-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        /* ========== MODAL DETALLE ========== */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.7);
+          backdrop-filter: blur(8px);
+          z-index: 2000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          animation: fadeIn 0.3s ease;
+        }
+
+        .modal-content {
+          background: linear-gradient(145deg, #064e3b, #022c22);
+          border-radius: 28px;
+          width: 100%;
+          max-width: 900px;
+          max-height: 90vh;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4);
+          animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .modal-header {
+          padding: 30px;
+          border-bottom: 1px solid rgba(16, 185, 129, 0.15);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: rgba(16, 185, 129, 0.05);
+        }
+
+        .modal-icon-wrapper {
+          width: 60px;
+          height: 60px;
+          border-radius: 18px;
+          background: linear-gradient(135deg, #10b981, #059669);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+        }
+
+        .modal-close-btn {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: rgba(16, 185, 129, 0.1);
+          border: 1px solid rgba(16, 185, 129, 0.2);
+          color: #86efac;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .modal-close-btn:hover {
+          background: rgba(239, 68, 68, 0.2);
+          border-color: rgba(239, 68, 68, 0.4);
+          color: #f87171;
+          transform: rotate(90deg);
+        }
+
+        .modal-body {
+          padding: 30px;
+          overflow-y: auto;
+          flex: 1;
+        }
+
+        .modal-body::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .modal-body::-webkit-scrollbar-track {
+          background: rgba(16, 185, 129, 0.1);
+          border-radius: 10px;
+        }
+
+        .modal-body::-webkit-scrollbar-thumb {
+          background: #10b981;
+          border-radius: 10px;
+        }
+
+        .detail-card {
+          background: rgba(16, 185, 129, 0.08);
+          border: 1px solid rgba(16, 185, 129, 0.15);
+          border-radius: 20px;
+          padding: 24px;
+          height: 100%;
+          transition: all 0.3s ease;
+        }
+
+        .detail-card:hover {
+          border-color: rgba(16, 185, 129, 0.3);
+          box-shadow: 0 8px 20px rgba(16, 185, 129, 0.1);
+        }
+
+        .detail-card-title {
+          font-size: 1.1rem;
+          font-weight: 700;
+          color: #f0fdf4;
+          margin-bottom: 20px;
+          display: flex;
+          align-items: center;
+          padding-bottom: 12px;
+          border-bottom: 1px solid rgba(16, 185, 129, 0.15);
+        }
+
+        .detail-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .detail-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px;
+          background: rgba(16, 185, 129, 0.05);
+          border-radius: 12px;
+          transition: all 0.2s ease;
+        }
+
+        .detail-item:hover {
+          background: rgba(16, 185, 129, 0.1);
+          transform: translateX(4px);
+        }
+
+        .detail-label {
+          font-size: 0.9rem;
+          color: #86efac;
+        }
+
+        .detail-value {
+          font-size: 0.95rem;
+          color: #f0fdf4;
+          font-weight: 600;
+        }
+
+        .stats-grid-modal {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px;
+        }
+
+        .stat-item-modal {
+          text-align: center;
+          padding: 20px;
+          background: rgba(16, 185, 129, 0.05);
+          border-radius: 16px;
+          transition: all 0.3s ease;
+        }
+
+        .stat-item-modal:hover {
+          background: rgba(16, 185, 129, 0.1);
           transform: translateY(-4px);
-          box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15);
-          border-color: var(--estudiante-primary);
         }
 
-        /* ========== RESPONSIVE ========== */
-        @media (max-width: 1024px) {
-          .estudiante-sidebar {
-            transform: translateX(-100%);
-            width: 280px !important;
-            z-index: 1050;
-          }
-          
-          .estudiante-sidebar.show {
-            transform: translateX(0);
-          }
-          
-          .main-content-wrapper {
-            margin-left: 0 !important;
-            width: 100vw !important;
-            max-width: 100vw !important;
-          }
-          
-          .estudiante-header {
-            padding: 12px 16px !important;
-          }
-          
-          .estudiante-header .d-flex {
-            flex-wrap: wrap;
-            gap: 0.75rem;
-          }
-          
-          .search-input-estudiante {
-            width: 140px;
-          }
-          
-          .action-btn-estudiante,
-          .action-btn {
-            width: 40px !important;
-            height: 40px !important;
-            min-width: 40px;
-            min-height: 40px;
-          }
-          
-          .stat-card-estudiante {
-            padding: 18px !important;
-          }
-          
-          .stat-card-estudiante h3 {
-            font-size: 1.75rem !important;
-          }
+        .stat-icon-modal {
+          font-size: 2rem;
+          color: #10b981;
+          margin-bottom: 12px;
         }
-        
+
+        .stat-label-modal {
+          display: block;
+          font-size: 0.85rem;
+          color: #86efac;
+          margin-bottom: 8px;
+        }
+
+        .stat-value-modal {
+          display: block;
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #f0fdf4;
+        }
+
+        .progress-section-modal {
+          padding: 16px;
+          background: rgba(16, 185, 129, 0.05);
+          border-radius: 16px;
+        }
+
+        .progress-bar-modal {
+          height: 12px;
+          background: rgba(16, 185, 129, 0.2);
+          border-radius: 10px;
+          overflow: hidden;
+        }
+
+        .progress-fill-modal {
+          height: 100%;
+          background: linear-gradient(90deg, #10b981, #06b6d4);
+          border-radius: 10px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .progress-fill-modal::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+          animation: shimmer 2s infinite;
+        }
+
+        .modal-footer {
+          padding: 20px 30px;
+          border-top: 1px solid rgba(16, 185, 129, 0.15);
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          background: rgba(16, 185, 129, 0.03);
+        }
+
+        .btn-modal-close {
+          padding: 12px 24px;
+          border-radius: 12px;
+          background: rgba(16, 185, 129, 0.15);
+          border: 1px solid rgba(16, 185, 129, 0.25);
+          color: #86efac;
+          font-weight: 600;
+          transition: all 0.3s ease;
+        }
+
+        .btn-modal-close:hover {
+          background: rgba(16, 185, 129, 0.25);
+          border-color: rgba(16, 185, 129, 0.4);
+          color: #f0fdf4;
+        }
+
         @media (max-width: 768px) {
-          .estudiante-header h1 {
-            font-size: 1.25rem !important;
+          .modal-content {
+            max-width: 100%;
+            margin: 0 10px;
+            max-height: 95vh;
           }
-          
-          .estudiante-header img {
-            height: 35px !important;
+
+          .modal-header {
+            padding: 20px;
           }
-          
-          .search-input-estudiante {
-            width: 120px;
-            font-size: 14px;
+
+          .modal-body {
+            padding: 20px;
           }
-          
-          .action-btn-estudiante,
-          .action-btn {
-            width: 36px !important;
-            height: 36px !important;
-            min-width: 36px;
-            min-height: 36px;
+
+          .stats-grid-modal {
+            grid-template-columns: 1fr;
           }
-          
-          .stat-card-estudiante {
-            padding: 16px !important;
-          }
-          
-          .stat-card-estudiante h3 {
-            font-size: 1.5rem !important;
-          }
-          
-          .estudiante-card {
-            margin-bottom: 12px;
-          }
-          
-          .table-responsive {
-            font-size: 14px;
+
+          .modal-footer {
+            padding: 16px 20px;
           }
         }
-        
-        @media (max-width: 480px) {
-          .estudiante-header {
-            padding: 10px 12px !important;
-          }
-          
-          .estudiante-header h1 {
-            font-size: 1.1rem !important;
-          }
-          
-          .estudiante-header img {
-            height: 30px !important;
-          }
-          
-          .search-input-estudiante {
-            width: 100px;
-            font-size: 13px;
-          }
-          
-          .action-btn-estudiante,
-          .action-btn {
-            width: 32px !important;
-            height: 32px !important;
-          }
-          
-          .stat-card-estudiante h3 {
-            font-size: 1.35rem !important;
-          }
+
+        /* ========== CALIFICACIONES PLACEHOLDER ========== */
+        .calificaciones-placeholder {
+          text-align: center;
+          padding: 60px 20px;
+        }
+
+        .calificaciones-icon {
+          font-size: 4rem;
+          color: #10b981;
+          opacity: 0.3;
+          margin-bottom: 24px;
+        }
+
+        .calificaciones-title {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #f0fdf4;
+          margin-bottom: 12px;
+        }
+
+        .calificaciones-description {
+          color: #86efac;
+        }
+
+        /* ========== CHAT CONTAINER ========== */
+        .chat-container {
+          height: calc(100vh - 200px);
+          min-height: 500px;
+          display: flex;
+          flex-direction: column;
         }
       `}</style>
 
-      <div className="d-flex estudiante-dashboard">
-        {/* Loading */}
+      <EstudianteDashboardLayout
+        userInfo={userInfo}
+        menuItems={menuItems}
+        activeModule={activeModule}
+        onModuleChange={handleModuleChange}
+        loading={loading}
+        onLogout={onLogout}
+        sidebarCollapsed={sidebarCollapsed}
+        isMobile={isMobile}
+        mobileSidebarOpen={mobileSidebarOpen}
+        onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        darkMode={darkMode}
+        highContrast={highContrast}
+        toggleTheme={toggleTheme}
+        toggleHighContrast={toggleHighContrast}
+        getModuleTitle={getModuleTitle}
+        studentStats={studentStats}
+        studentLevel={studentLevel}
+        studentGrade={studentGradeDisplay}
+        studentSection={studentSection}
+      >
+        {/* Loading Overlay */}
         {loading && (
-          <div className="loading-overlay">
+          <div className="loading-overlay-estudiante">
             <div className="text-center">
               <div className="spinner-estudiante mb-3"></div>
-              <p className="text-muted">Cargando...</p>
+              <p style={{ color: '#86efac' }}>Cargando...</p>
             </div>
           </div>
         )}
 
-        {/* Mobile Overlay */}
-        {isMobile && mobileSidebarOpen && (
-          <div 
-            className="mobile-overlay"
-            onClick={() => setMobileSidebarOpen(false)}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              zIndex: 1040,
-              animation: 'fadeIn 0.3s ease'
-            }}
-          />
-        )}
-
-        {/* Sidebar */}
-        <nav
-          className={`estudiante-sidebar ${sidebarCollapsed && !isMobile ? 'sidebar-collapsed' : ''} ${isMobile && mobileSidebarOpen ? 'show' : ''}`}
-          style={{
-            width: (sidebarCollapsed && !isMobile) ? '80px' : '280px'
-          }}
-        >
-          {/* Logo */}
-          <div className="p-4 border-bottom" style={{ borderColor: 'rgba(255, 255, 255, 0.1)' }}>
-            <div className="d-flex align-items-center justify-content-center" style={{ minHeight: '80px' }}>
-              {sidebarCollapsed ? (
-                <div style={{ width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="I.E Peruano Japonés 7213">
-                  <img src="./logo.png" alt="Logo" style={{ width: "48px", height: "48px", objectFit: "contain" }} />
-                </div>
-              ) : (
-                <div className="nav-text text-center" style={{ width: '100%' }}>
-                  <img src="./logo.png" alt="Logo" style={{ width: "60px", height: "60px", objectFit: "contain", marginBottom: "5px" }} />
-                  <h5 className="mb-0 fw-bold" style={{ color: 'white' }}>I.E Peruano Japonés 7213</h5>
-                  <small className="text-muted">Panel del Estudiante</small>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Botón de colapsar/expandir */}
-          <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-            <button 
-              className="btn btn-link p-0 w-100"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              style={{ 
-                color: 'white',
-                background: 'rgba(255, 255, 255, 0.1)',
-                height: '36px',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-              }}
-              title={sidebarCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-            >
-              <div style={{ 
-                transition: 'transform 0.3s ease',
-                transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-              }}>
-                <FaChevronLeft size={14} />
-              </div>
-            </button>
-          </div>
-
-          {/* User Info */}
-          <div className="p-4 border-bottom" style={{ borderColor: 'rgba(255, 255, 255, 0.1)' }}>
-            <div 
-              className="d-flex align-items-center"
-              style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
-            >
-              <div 
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  background: 'var(--estudiante-light)',
-                  borderRadius: '50%',
-                  color: 'white',
-                  marginRight: sidebarCollapsed ? '0' : '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <FaGraduationCap size={16} />
-              </div>
-              {!sidebarCollapsed && (
-                <div className="flex-grow-1 user-details">
-                  <div className="fw-medium" style={{ color: 'white' }}>{userInfo?.nombre || 'Estudiante'}</div>
-                  <small className="text-muted">{userInfo?.rol || 'Alumno'}</small>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <div className="p-3 flex-grow-1">
-            {menuItems.map((category, categoryIndex) => (
-              <div key={categoryIndex}>
-                {!sidebarCollapsed && (
-                  <div className="category-title">{category.category}</div>
-                )}
-                <ul className="list-unstyled">
-                  {category.items.map((item) => (
-                    <li key={item.id} className="nav-item">
-                      <button
-                        className={`nav-link-estudiante ${
-                          (activeModule === item.module || (!activeModule && item.module === null)) 
-                            ? 'active' : ''
-                        }`}
-                        onClick={() => handleModuleChange(item.module)}
-                        disabled={loading}
-                      >
-                        <div className="icon-wrapper">
-                          <item.icon size={16} />
-                        </div>
-                        <span className="nav-text">{item.label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-
-          {/* Logout */}
-          <div className="p-3 border-top" style={{ borderColor: 'rgba(255, 255, 255, 0.1)' }}>
-            <button
-              className="nav-link-estudiante text-danger"
-              onClick={onLogout}
-              disabled={loading}
-            >
-              <div className="icon-wrapper">
-                <FaSignOutAlt size={16} />
-              </div>
-              <span className="nav-text">Cerrar sesión</span>
-            </button>
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main 
-          className="flex-grow-1 main-content-wrapper"
-          style={{ 
-            marginLeft: (sidebarCollapsed && !isMobile) ? '80px' : (isMobile ? '0' : '280px'),
-            transition: 'margin-left 0.3s ease',
-            width: (sidebarCollapsed && !isMobile) ? 'calc(100vw - 80px)' : (isMobile ? '100vw' : 'calc(100vw - 280px)'),
-            maxWidth: isMobile ? '100vw' : undefined,
-            overflowX: 'hidden'
-          }}
-        >
-          {/* Header */}
-          <div className="estudiante-header">
-            <div className="d-flex align-items-center justify-content-between">
+        {/* Notifications */}
+        {error && (
+          <div className="notification-estudiante">
+            <div className="alert alert-danger border-0 shadow mb-0" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
               <div className="d-flex align-items-center">
-                <img src="/logo.png" alt="Logo" className="me-3" style={{height: '45px', width: 'auto'}} />
-                <div>
-                  <h1 className="h4 mb-1 fw-bold">{getModuleTitle(activeModule)}</h1>
-                  <p className="mb-0 text-muted small">
-                    {new Date().toLocaleDateString('es-ES', { 
-                      weekday: 'long', 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric' 
-                    })}
+                <div className="me-3">
+                  <div style={{ width: '32px', height: '32px', background: 'rgba(239, 68, 68, 0.2)', borderRadius: '8px', color: '#f87171', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <FaTimes size={16} />
+                  </div>
+                </div>
+                <div className="flex-grow-1">
+                  <strong style={{ color: '#fca5a5' }}>Error</strong>
+                  <div style={{ color: '#fecaca' }}>{error}</div>
+                </div>
+                <button type="button" className="btn-close" onClick={() => setError('')}></button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="notification-estudiante">
+            <div className="alert alert-success border-0 shadow mb-0" style={{ background: 'rgba(16, 185, 129, 0.15)', borderColor: 'rgba(16, 185, 129, 0.3)' }}>
+              <div className="d-flex align-items-center">
+                <div className="me-3">
+                  <div style={{ width: '32px', height: '32px', background: 'rgba(16, 185, 129, 0.2)', borderRadius: '8px', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <FaCheck size={16} />
+                  </div>
+                </div>
+                <div className="flex-grow-1">
+                  <strong style={{ color: '#86efac' }}>Éxito</strong>
+                  <div style={{ color: '#a7f3d0' }}>{success}</div>
+                </div>
+                <button type="button" className="btn-close" onClick={() => setSuccess('')}></button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Module Content */}
+        {activeModule === 'mis-clases' && (
+          <div className="mis-clases-container">
+            <div className="mis-clases-header">
+              <div className="header-info">
+                <h3>Mis Clases Asignadas</h3>
+                <p>
+                  <FaBookOpen className="me-2" />
+                  {cursosInscritos.length} {cursosInscritos.length === 1 ? 'clase asignada' : 'clases asignadas'}
+                </p>
+              </div>
+              <button
+                className="btn-refresh-clases"
+                onClick={handleRefreshCursos}
+                disabled={refreshingCursos}
+              >
+                <FaSync className={refreshingCursos ? 'fa-spin' : ''} />
+                {refreshingCursos ? 'Actualizando...' : 'Actualizar Lista'}
+              </button>
+            </div>
+
+            {cursosInscritos.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon-wrapper">
+                  <FaBookOpen />
+                </div>
+                <h4 className="empty-title">Aún no tienes cursos asignados</h4>
+                <p className="empty-description">
+                  Una vez que el administrador te asigne clases, aparecerán automáticamente aquí.
+                </p>
+              </div>
+            ) : (
+              <div className="clases-grid">
+                {cursosInscritos.map((curso, index) => (
+                  <div key={resolverCursoId(curso)} className="clase-card" style={{ animationDelay: `${index * 0.1}s` }}>
+                    <div className="clase-card-header">
+                      <div className="clase-icon-wrapper">
+                        <FaBookOpen />
+                      </div>
+                      <div className="clase-status-badge">
+                        <span className="status-dot"></span>
+                        Activo
+                      </div>
+                    </div>
+
+                    <div className="clase-card-body">
+                      <h5 className="clase-title">{resolverNombreCurso(curso)}</h5>
+
+                      <div className="clase-info-item">
+                        <div className="info-icon">
+                          <FaUser />
+                        </div>
+                        <div className="info-content">
+                          <span className="info-label">Profesor</span>
+                          <span className="info-value">{resolverDocenteCurso(curso)}</span>
+                        </div>
+                      </div>
+
+                      <div className="clase-info-item">
+                        <div className="info-icon">
+                          <FaCalendarAlt />
+                        </div>
+                        <div className="info-content">
+                          <span className="info-label">Horario</span>
+                          <span className="info-value">{resolverHorario(curso)}</span>
+                        </div>
+                      </div>
+
+                      <div className="clase-info-item">
+                        <div className="info-icon">
+                          <FaClock />
+                        </div>
+                        <div className="info-content">
+                          <span className="info-label">Período</span>
+                          <span className="info-value">{resolverFechas(curso).inicio} - {resolverFechas(curso).fin}</span>
+                        </div>
+                      </div>
+
+                      <div className="clase-progress-section">
+                        <div className="progress-header">
+                          <span className="progress-text">Progreso del curso</span>
+                          <span className="progress-percent">0%</span>
+                        </div>
+                        <div className="progress-bar-clase">
+                          <div className="progress-fill-clase" style={{ width: '0%' }}></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="clase-card-footer">
+                      <button className="btn-ver-detalle" onClick={() => handleVerDetalle(curso)}>
+                        <FaChartLine />
+                        Ver Detalles
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeModule === 'mis-asistencias' && (
+          <div className="asistencias-container">
+            <div className="asistencias-header">
+              <div className="header-info">
+                <h3 style={{ color: '#f0fdf4', margin: '0 0 8px 0' }}>Mis Asistencias</h3>
+                <p style={{ color: '#86efac', margin: 0 }}>
+                  Visualiza lo que registra tu docente o corrige el administrador en tiempo real.
+                </p>
+              </div>
+              <button
+                className="btn-sync-asistencia"
+                onClick={handleRefreshAsistencias}
+                disabled={refreshingAsistencias}
+              >
+                <FaSync className={refreshingAsistencias ? 'fa-spin' : ''} />
+                {refreshingAsistencias ? 'Sincronizando...' : 'Sincronizar'}
+              </button>
+            </div>
+
+            <div className="asistencias-filters">
+              <div className="filter-field">
+                <label>Estado</label>
+                <select
+                  className="filter-select"
+                  value={asistenciaEstadoFiltro}
+                  onChange={(e) => setAsistenciaEstadoFiltro(e.target.value)}
+                >
+                  <option value="todos">Todos</option>
+                  <option value="presente">Presente</option>
+                  <option value="ausente">Ausente</option>
+                  <option value="justificado">Justificado</option>
+                  <option value="tardanza">Tardanza</option>
+                </select>
+              </div>
+              <div className="filter-field">
+                <label>Rango de fechas</label>
+                <select
+                  className="filter-select"
+                  value={rangoAsistencia}
+                  onChange={(e) => setRangoAsistencia(e.target.value)}
+                >
+                  <option value="30">Últimos 30 días</option>
+                  <option value="90">Últimos 90 días</option>
+                  <option value="365">Último año</option>
+                  <option value="all">Todo el historial</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="asistencias-summary">
+              {Object.entries(ASISTENCIA_ESTADO_CONFIG)
+                .filter(([key]) => key !== 'default')
+                .map(([key, config]) => {
+                  const EstadoIcon = config.icon;
+                  return (
+                    <div key={key} className="summary-card">
+                      <div className="summary-icon" style={{ background: config.bg, color: config.color }}>
+                        <EstadoIcon size={18} />
+                      </div>
+                      <div className="summary-info">
+                        <h4 style={{ color: config.color }}>{resumenEstados[key] || 0}</h4>
+                        <p>{config.label}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              <div className="summary-card" style={{ background: 'rgba(16, 185, 129, 0.1)' }}>
+                <div className="summary-icon" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#10b981' }}>
+                  <FaClipboardCheck size={18} />
+                </div>
+                <div className="summary-info">
+                  <h4 style={{ color: '#10b981' }}>{asistenciasOrdenadas.length}</h4>
+                  <p>Total registros</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="asistencias-table">
+              {ultimasAsistencias.length === 0 ? (
+                <div className="empty-state" style={{ margin: '20px' }}>
+                  <div className="empty-icon-wrapper">
+                    <FaClipboardCheck />
+                  </div>
+                  <h4 className="empty-title">Sin asistencias registradas</h4>
+                  <p className="empty-description">
+                    Cuando el docente pase lista o el administrador corrija algo, podrás verlo aquí.
                   </p>
                 </div>
-              </div>
-              
+              ) : (
+                ultimasAsistencias.map((registro) => {
+                  const estadoKey = String(registro.estado || '').toLowerCase();
+                  const config = ASISTENCIA_ESTADO_CONFIG[estadoKey] || ASISTENCIA_ESTADO_CONFIG.default;
+                  const EstadoIcon = config.icon;
+                  const ultimaActualizacion = formatFechaHora(registro.fecha_modificacion || registro.fecha);
+                  return (
+                    <div
+                      className="asistencia-row"
+                      key={`${registro.id || registro.fecha}-${registro.materia_id || registro.curso_id || 'curso'}`}
+                    >
+                      <div>
+                        <span className="date-large">{formatFechaCorta(registro.fecha)}</span>
+                        <span className="date-sub d-block">{formatFechaLarga(registro.fecha)}</span>
+                      </div>
+                      <div>
+                        <p className="course-name">{registro.curso_nombre || 'Curso pendiente de nombre'}</p>
+                        <p className="course-meta">Última actualización: {ultimaActualizacion || 'Sin registro'}</p>
+                      </div>
+                      <div>
+                        <span className="estado-pill" style={{ background: config.bg, color: config.color }}>
+                          <EstadoIcon size={14} />
+                          {config.label}
+                        </span>
+                      </div>
+                      <div className="asistencia-observaciones">
+                        {registro.observaciones || 'Sin observaciones'}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeModule === 'mis-calificaciones' && (
+          <div className="calificaciones-placeholder">
+            <FaTrophy className="calificaciones-icon" />
+            <h3 className="calificaciones-title">Mis Calificaciones</h3>
+            <p className="calificaciones-description">Consulta tus calificaciones aquí.</p>
+          </div>
+        )}
+
+        {activeModule === 'chat' && (
+          <div className="chat-container">
+            <Chat user={userInfo} token={token} />
+          </div>
+        )}
+
+        {activeModule === 'configuracion' && (
+          <ConfiguracionEstudiante
+            userInfo={userInfo}
+            darkMode={darkMode}
+            toggleTheme={toggleTheme}
+            token={token}
+            showError={showError}
+            showSuccess={showSuccess}
+          />
+        )}
+      </EstudianteDashboardLayout>
+
+      {/* Modal de Detalles de Clase */}
+      {showDetalleModal && claseSeleccionada && (
+        <div className="modal-overlay" onClick={handleCerrarDetalle}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
               <div className="d-flex align-items-center gap-3">
-                {!isMobile && (
-                  <div 
-                    className="action-btn-estudiante"
-                    onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                    title={sidebarCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-                  >
-                    <FaChevronLeft size={16} style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }} />
+                <div className="modal-icon-wrapper">
+                  <FaBookOpen size={28} />
+                </div>
+                <div>
+                  <h3 style={{ margin: '0 0 4px 0', color: '#f0fdf4' }}>{resolverNombreCurso(claseSeleccionada)}</h3>
+                  <p style={{ margin: 0, color: '#86efac' }}>Detalles del curso</p>
+                </div>
+              </div>
+              <button className="modal-close-btn" onClick={handleCerrarDetalle}>
+                <FaTimes size={20} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="row g-4">
+                {/* Información General */}
+                <div className="col-md-6">
+                  <div className="detail-card">
+                    <h5 className="detail-card-title">
+                      <FaUser className="me-2" style={{ color: '#10b981' }} />
+                      Información General
+                    </h5>
+                    <div className="detail-list">
+                      <div className="detail-item">
+                        <span className="detail-label">Profesor:</span>
+                        <span className="detail-value">{resolverDocenteCurso(claseSeleccionada)}</span>
+                      </div>
+                      <div className="detail-item">
+                        <span className="detail-label">Email:</span>
+                        <span className="detail-value">
+                          {claseSeleccionada.profesor_email || claseSeleccionada.profesorEmail || 'No disponible'}
+                        </span>
+                      </div>
+                      <div className="detail-item">
+                        <span className="detail-label">Código:</span>
+                        <span className="detail-value">{resolverCursoId(claseSeleccionada)}</span>
+                      </div>
+                      <div className="detail-item">
+                        <span className="detail-label">Estado:</span>
+                        <span className="badge" style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>Activo</span>
+                      </div>
+                      <div className="detail-item">
+                        <span className="detail-label">Horario:</span>
+                        <span className="detail-value">{resolverHorario(claseSeleccionada)}</span>
+                      </div>
+                    </div>
                   </div>
-                )}
-                
-                {isMobile && (
-                  <div 
-                    className="action-btn-estudiante"
-                    onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-                    title="Menú"
-                  >
-                    <FaBars size={16} />
+                </div>
+
+                {/* Estadísticas */}
+                <div className="col-md-6">
+                  <div className="detail-card">
+                    <h5 className="detail-card-title">
+                      <FaChartLine className="me-2" style={{ color: '#10b981' }} />
+                      Mis Estadísticas
+                    </h5>
+                    <div className="stats-grid-modal">
+                      <div className="stat-item-modal">
+                        <FaClipboardCheck className="stat-icon-modal" />
+                        <span className="stat-label-modal">Asistencia</span>
+                        <span className="stat-value-modal">0%</span>
+                      </div>
+                      <div className="stat-item-modal">
+                        <FaTrophy className="stat-icon-modal" />
+                        <span className="stat-label-modal">Promedio</span>
+                        <span className="stat-value-modal">N/A</span>
+                      </div>
+                      <div className="stat-item-modal">
+                        <FaCalendarAlt className="stat-icon-modal" />
+                        <span className="stat-label-modal">Clases</span>
+                        <span className="stat-value-modal">0</span>
+                      </div>
+                    </div>
                   </div>
-                )}
-                
-                <div className="position-relative">
-                  <input
-                    type="text"
-                    className="search-input-estudiante"
-                    placeholder="Buscar..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                  <FaSearch 
-                    className="position-absolute" 
-                    style={{ left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} 
-                    size={14} 
-                  />
                 </div>
-                
-                <div className="action-btn-estudiante">
-                  <FaRegBell size={16} />
+
+                {/* Progreso */}
+                <div className="col-12">
+                  <div className="detail-card">
+                    <h5 className="detail-card-title">
+                      <FaChartLine className="me-2" style={{ color: '#10b981' }} />
+                      Progreso del Curso
+                    </h5>
+                    <div className="progress-section-modal">
+                      <div className="d-flex justify-content-between mb-3">
+                        <span style={{ color: '#86efac' }}>Avance del curso</span>
+                        <span style={{ fontWeight: 'bold', color: '#10b981' }}>0%</span>
+                      </div>
+                      <div className="progress-bar-modal">
+                        <div className="progress-fill-modal" style={{ width: '0%' }}></div>
+                      </div>
+                      <p style={{ color: '#86efac', marginTop: '12px', marginBottom: 0, fontSize: '0.9rem' }}>
+                        Completa las actividades y asiste a clases para mejorar tu progreso
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                
-                <div className="action-btn-estudiante">
-                  <FaFilter size={16} />
-                </div>
-                
-                <div className="action-btn-estudiante" onClick={toggleTheme} title={darkMode ? 'Modo claro' : 'Modo oscuro'}>
-                  {darkMode ? <FaSun size={16} /> : <FaMoon size={16} />}
-                </div>
-                
-                <div className="action-btn-estudiante" onClick={toggleHighContrast} title={highContrast ? 'Desactivar alto contraste' : 'Activar alto contraste'}>
-                  <FaAdjust size={16} />
+
+                {/* Descripción */}
+                <div className="col-12">
+                  <div className="detail-card">
+                    <h5 className="detail-card-title">
+                      <FaBookOpen className="me-2" style={{ color: '#10b981' }} />
+                      Descripción del Curso
+                    </h5>
+                    <p style={{ color: '#86efac', margin: 0 }}>
+                      {claseSeleccionada.descripcion || 'Este curso está diseñado para ayudarte a mejorar tus habilidades en inglés. Aprenderás vocabulario, gramática y conversación de forma práctica y dinámica.'}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
+
+            <div className="modal-footer">
+              <button className="btn-modal-close" onClick={handleCerrarDetalle}>
+                Cerrar
+              </button>
+            </div>
           </div>
-
-          {/* Content */}
-          <div className="p-4">
-            {/* Notifications */}
-            {error && (
-              <div className="notification">
-                <div className="alert alert-danger border-0 shadow mb-0">
-                  <div className="d-flex align-items-center">
-                    <div className="me-3">
-                      <div style={{ width: '32px', height: '32px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', color: 'var(--accent-danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <FaTimes size={16} />
-                      </div>
-                    </div>
-                    <div className="flex-grow-1">
-                      <strong>Error</strong>
-                      <div>{error}</div>
-                    </div>
-                    <button type="button" className="btn-close" onClick={() => setError('')}></button>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            {success && (
-              <div className="notification">
-                <div className="alert alert-success border-0 shadow mb-0">
-                  <div className="d-flex align-items-center">
-                    <div className="me-3">
-                      <div style={{ width: '32px', height: '32px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', color: 'var(--accent-success)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <FaCheck size={16} />
-                      </div>
-                    </div>
-                    <div className="flex-grow-1">
-                      <strong>Éxito</strong>
-                      <div>{success}</div>
-                    </div>
-                    <button type="button" className="btn-close" onClick={() => setSuccess('')}></button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Dashboard Content */}
-            {!activeModule && !loading && (
-              <div className="fade-in">
-                {/* Stats */}
-                <div className="row g-4 mb-4">
-                  <div className="col-lg-3 col-md-6">
-                    <div className="stat-card-estudiante">
-                      <div className="d-flex align-items-center justify-content-between mb-3">
-                        <div>
-                          <h3 className="h2 mb-0 fw-bold">{totalCursosInscritos}</h3>
-                          <p className="mb-0 text-muted">Cursos Inscritos</p>
-                        </div>
-                        <div style={{ width: '48px', height: '48px', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '12px', color: 'var(--estudiante-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <FaBookOpen size={24} />
-                        </div>
-                      </div>
-                      <div className="text-muted small">
-                        <span className="text-success">Activos</span> este semestre
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="col-lg-3 col-md-6">
-                    <div className="stat-card-estudiante">
-                      <div className="d-flex align-items-center justify-content-between mb-3">
-                        <div>
-                          <h3 className="h2 mb-0 fw-bold">{calcularAsistencia()}</h3>
-                          <p className="mb-0 text-muted">Asistencia</p>
-                        </div>
-                        <div style={{ width: '48px', height: '48px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <FaClipboardCheck size={24} />
-                        </div>
-                      </div>
-                      <div className="text-muted small">
-                        <span className="text-success">Total</span> registrada
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="col-lg-3 col-md-6">
-                    <div className="stat-card-estudiante">
-                      <div className="d-flex align-items-center justify-content-between mb-3">
-                        <div>
-                          <h3 className="h2 mb-0 fw-bold">{calcularPromedio()}</h3>
-                          <p className="mb-0 text-muted">Promedio</p>
-                        </div>
-                        <div style={{ width: '48px', height: '48px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '12px', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <FaTrophy size={24} />
-                        </div>
-                      </div>
-                      <div className="text-muted small">
-                        <span className="text-success">General</span> del semestre
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="col-lg-3 col-md-6">
-                    <div className="stat-card-estudiante">
-                      <div className="d-flex align-items-center justify-content-between mb-3">
-                        <div>
-                          <h3 className="h2 mb-0 fw-bold">{disponibles.length}</h3>
-                          <p className="mb-0 text-muted">Cursos Disponibles</p>
-                        </div>
-                        <div style={{ width: '48px', height: '48px', background: 'rgba(139, 92, 246, 0.1)', borderRadius: '12px', color: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <FaPlus size={24} />
-                        </div>
-                      </div>
-                      <div className="text-muted small">
-                        <span className="text-success">Para</span> inscribirse
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Quick Actions */}
-                <div className="estudiante-card p-4">
-                  <h5 className="mb-4 fw-bold">Acciones Rápidas</h5>
-                  <div className="row g-3">
-                    <div className="col-md-4">
-                      <div className="quick-action-estudiante" onClick={() => handleModuleChange('mis-clases')}>
-                        <div style={{ width: '64px', height: '64px', background: 'var(--estudiante-primary)', borderRadius: '16px', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                          <FaBookOpen size={24} />
-                        </div>
-                        <h6 className="fw-bold">Ver Mis Clases</h6>
-                        <p className="text-muted small mb-0">Acceder a mis cursos</p>
-                      </div>
-                    </div>
-                    <div className="col-md-4">
-                      <div className="quick-action-estudiante" onClick={() => handleModuleChange('mis-calificaciones')}>
-                        <div style={{ width: '64px', height: '64px', background: '#f59e0b', borderRadius: '16px', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                          <FaTrophy size={24} />
-                        </div>
-                        <h6 className="fw-bold">Ver Calificaciones</h6>
-                        <p className="text-muted small mb-0">Revisar mis notas</p>
-                      </div>
-                    </div>
-                    <div className="col-md-4">
-                      <div className="quick-action-estudiante" onClick={() => handleModuleChange('seleccionar-curso')}>
-                        <div style={{ width: '64px', height: '64px', background: '#8b5cf6', borderRadius: '16px', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                          <FaPlus size={24} />
-                        </div>
-                        <h6 className="fw-bold">Inscribir Curso</h6>
-                        <p className="text-muted small mb-0">Matricularme en cursos</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Module Content */}
-            {activeModule && !loading && (
-              <div className="fade-in">
-                <div className="estudiante-card p-4">
-                  {activeModule === 'mis-clases' && (
-                    <div>
-                      <h3 className="mb-4">Mis Clases</h3>
-                      {cursosInscritos.length === 0 ? (
-                        <div className="text-center py-5">
-                          <FaBookOpen size={50} className="text-primary opacity-25 mb-3" />
-                          <h5>No tienes clases inscritas</h5>
-                          <p className="text-muted">Ve a "Inscribir Cursos" para matricularte</p>
-                          <button className="btn btn-primary" onClick={() => handleModuleChange('seleccionar-curso')}>
-                            <FaPlus className="me-2" /> Inscribir en Curso
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="row g-3">
-                          {cursosInscritos.map((curso) => (
-                            <div key={resolverCursoId(curso)} className="col-md-6 col-lg-4">
-                              <div className="curso-card">
-                                <h5 className="fw-bold mb-3">{resolverNombreCurso(curso)}</h5>
-                                <p className="text-muted mb-2">
-                                  <FaUser className="me-2" />
-                                  {resolverDocenteCurso(curso)}
-                                </p>
-                                <div className="d-flex justify-content-between align-items-center mt-3">
-                                  <button className="btn btn-sm btn-outline-primary">Ver Detalle</button>
-                                  <button 
-                                    className="btn btn-sm btn-outline-danger"
-                                    onClick={() => handleCancelarInscripcion(resolverCursoId(curso))}
-                                    disabled={droppingId === resolverCursoId(curso)}
-                                  >
-                                    {droppingId === resolverCursoId(curso) ? 'Cancelando...' : 'Cancelar'}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {activeModule === 'seleccionar-curso' && (
-                    <div>
-                      <div className="d-flex justify-content-between align-items-center mb-4">
-                        <h3 className="mb-0">Cursos Disponibles</h3>
-                        <button 
-                          className="btn btn-primary"
-                          onClick={handleRefreshCursos}
-                          disabled={refreshingCursos}
-                        >
-                          <FaSync className={`me-2 ${refreshingCursos ? 'fa-spin' : ''}`} />
-                          Actualizar
-                        </button>
-                      </div>
-                      {disponibles.length === 0 ? (
-                        <div className="text-center py-5">
-                          <FaBookOpen size={50} className="text-primary opacity-25 mb-3" />
-                          <h5>No hay cursos disponibles</h5>
-                          <p className="text-muted">En este momento no hay cursos disponibles para inscripción</p>
-                        </div>
-                      ) : (
-                        <div className="row g-3">
-                          {disponibles.map((curso) => (
-                            <div key={resolverCursoId(curso)} className="col-md-6 col-lg-4">
-                              <div className="curso-card">
-                                <h5 className="fw-bold mb-3">{resolverNombreCurso(curso)}</h5>
-                                <p className="text-muted mb-2">
-                                  <FaUser className="me-2" />
-                                  {resolverDocenteCurso(curso)}
-                                </p>
-                                <button 
-                                  className="btn btn-primary w-100 mt-3"
-                                  onClick={() => handleInscribirse(resolverCursoId(curso))}
-                                  disabled={enrollingId === resolverCursoId(curso)}
-                                >
-                                  {enrollingId === resolverCursoId(curso) ? (
-                                    <>Inscribiendo...</>
-                                  ) : (
-                                    <><FaPlus className="me-2" /> Inscribirse</>
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {activeModule === 'mis-asistencias' && (
-                    <div className="text-center py-5">
-                      <FaClipboardCheck size={50} className="text-primary opacity-25 mb-3" />
-                      <h3>Mis Asistencias</h3>
-                      <p className="text-muted">Revisa tu historial de asistencias aquí.</p>
-                    </div>
-                  )}
-
-                  {activeModule === 'mis-calificaciones' && (
-                    <div className="text-center py-5">
-                      <FaTrophy size={50} className="text-primary opacity-25 mb-3" />
-                      <h3>Mis Calificaciones</h3>
-                      <p className="text-muted">Consulta tus calificaciones aquí.</p>
-                    </div>
-                  )}
-                  
-                  {activeModule === 'chat' && (
-                    <div style={{ 
-                      height: 'calc(100vh - 200px)', 
-                      minHeight: '500px',
-                      display: 'flex',
-                      flexDirection: 'column'
-                    }}>
-                      <Chat user={userInfo} token={token} />
-                    </div>
-                  )}
-                  
-                  {activeModule === 'configuracion' && (
-                    <Configuracion
-                      userInfo={userInfo}
-                      darkMode={darkMode}
-                      toggleTheme={toggleTheme}
-                      token={token}
-                      showError={showError}
-                      showSuccess={showSuccess}
-                    />
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
+        </div>
+      )}
     </>
   );
 };

@@ -1,5 +1,6 @@
 import React from 'react';
 import { getUserInitials, getAvatarColor, isAdminRoleName } from '../utils/helpers';
+import UserAvatar from '../../components/UserAvatar';
 import '../styles/ChatHeader.css';
 
 /**
@@ -159,24 +160,32 @@ const ChatHeader = ({
           tabIndex={0}
           aria-label="Ver información del usuario"
         >
-          <div 
-            className="chat-header-avatar"
-            style={{ backgroundColor: hasGroupPhoto ? 'transparent' : avatarColor }}
-          >
+          <div className="chat-header-avatar">
             {hasGroupPhoto ? (
-              <img 
-                src={`http://localhost:3010${currentRoom.group_photo}`}
-                alt={displayName}
-                className="chat-header-avatar-img"
-                onError={(e) => {
-                  console.warn('Error loading group photo in header:', currentRoom.group_photo);
-                  e.target.style.display = 'none';
-                  e.target.parentElement.style.backgroundColor = avatarColor;
-                  e.target.parentElement.innerHTML = initials;
-                }}
+              <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden' }}>
+                <img 
+                  src={`http://localhost:3010${currentRoom.group_photo}`}
+                  alt={displayName}
+                  className="chat-header-avatar-img"
+                  onError={(e) => {
+                    console.warn('Error loading group photo in header:', currentRoom.group_photo);
+                    e.target.style.display = 'none';
+                    e.target.parentElement.style.backgroundColor = avatarColor;
+                    e.target.parentElement.innerHTML = initials;
+                  }}
+                />
+              </div>
+            ) : currentRoom?.type === 'private' && otherUser ? (
+              <UserAvatar 
+                userId={otherUser.userId}
+                nombre={displayName}
+                tieneFoto={otherUser.tieneFotoPerfil === 1 || otherUser.tieneFotoPerfil === true}
+                size="md"
               />
             ) : (
-              initials
+              <div style={{ backgroundColor: avatarColor, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontSize: '16px', fontWeight: '600', color: 'white' }}>
+                {initials}
+              </div>
             )}
           </div>
           

@@ -22,6 +22,10 @@ export const useChat = (userId, token) => {
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const toastIdCounter = useRef(0);
+  const roomsRef = useRef([]);
+  const currentRoomRef = useRef(null);
+  const loadRoomsRef = useRef(null);
+  const selectRoomRef = useRef(null);
 
   // Función para agregar toast
   const addToast = useCallback((message, type = 'info', duration = 4000) => {
@@ -64,27 +68,58 @@ export const useChat = (userId, token) => {
 
     newSocket.on('receive_message', (message) => {
       console.log('📩 Nuevo mensaje recibido:', message);
-      
-      // Agregar mensaje a la lista si es de la sala actual
-      setMessages(prev => {
-        // Evitar duplicados
-        if (prev.some(m => m.id === message.id)) {
-          return prev;
-        }
-        return [...prev, message];
-      });
 
-      // Actualizar último mensaje en rooms
-      setRooms(prev => prev.map(room => {
-        if (room.id === message.room_id) {
-          return {
-            ...room,
-            lastMessage: message,
-            lastMessageAt: message.sent_at
-          };
+      const messageRoomId = Number(message?.room_id);
+      const isCurrentRoom = currentRoomRef.current?.id === messageRoomId;
+
+      if (isCurrentRoom) {
+        // Agregar mensaje a la lista si es de la sala actual
+        setMessages(prev => {
+          if (prev.some(m => m.id === message.id)) {
+            return prev;
+          }
+          return [...prev, message];
+        });
+      }
+
+      const roomExists = roomsRef.current.some(room => room.id === messageRoomId);
+
+      if (roomExists) {
+        setRooms(prev => prev.map(room => {
+          if (room.id === messageRoomId) {
+            return {
+              ...room,
+              lastMessage: message,
+              lastMessageAt: message.sent_at
+            };
+          }
+          return room;
+        }));
+      } else {
+        console.log('🆕 Mensaje recibido de una sala no listada. Recargando conversaciones.');
+        if (typeof loadRoomsRef.current === 'function') {
+          try {
+            const reloadPromise = loadRoomsRef.current();
+            if (reloadPromise && typeof reloadPromise.then === 'function') {
+              reloadPromise
+                .then((updatedRooms) => {
+                  if (!Array.isArray(updatedRooms)) {
+                    return;
+                  }
+                  const matchingRoom = updatedRooms.find((room) => room.id === messageRoomId);
+                  if (matchingRoom && !currentRoomRef.current) {
+                    selectRoomRef.current?.(matchingRoom);
+                  }
+                })
+                .catch((loadError) => {
+                  console.error('Error refrescando conversaciones nuevas:', loadError);
+                });
+            }
+          } catch (loadInvokeError) {
+            console.error('No se pudo recargar las conversaciones:', loadInvokeError);
+          }
         }
-        return room;
-      }));
+      }
     });
 
     newSocket.on('message_updated', (message) => {
@@ -114,7 +149,9 @@ export const useChat = (userId, token) => {
       addToast(`${userName} se unió a ${roomName}`, 'user-joined', 4000);
       
       // Recargar rooms para actualizar participantes
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
     });
 
     newSocket.on('user_left_group', (data) => {
@@ -123,7 +160,9 @@ export const useChat = (userId, token) => {
       addToast(`${userName} salió de ${roomName}`, 'user-left', 4000);
       
       // Recargar rooms para actualizar participantes
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
     });
 
     newSocket.on('user_removed_from_group', (data) => {
@@ -132,7 +171,9 @@ export const useChat = (userId, token) => {
       addToast(`${userName} fue removido de ${roomName}`, 'user-removed', 4000);
       
       // Recargar rooms para actualizar participantes
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
     });
 
     newSocket.on('group_created', (data) => {
@@ -141,7 +182,9 @@ export const useChat = (userId, token) => {
       addToast(`Grupo "${roomName}" creado`, 'group-created', 4000);
       
       // Recargar rooms
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
     });
 
     newSocket.on('added_to_group', (data) => {
@@ -150,7 +193,9 @@ export const useChat = (userId, token) => {
       addToast(`Fuiste agregado al grupo "${roomName}"`, 'success', 4000);
       
       // Recargar rooms
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
     });
 
     newSocket.on('participants_added', (data) => {
@@ -160,7 +205,9 @@ export const useChat = (userId, token) => {
       addToast(`${count} participante(s) agregado(s)`, 'success', 4000);
       
       // Recargar rooms
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
     });
 
     newSocket.on('group_deleted', (data) => {
@@ -169,9 +216,11 @@ export const useChat = (userId, token) => {
       addToast(`El grupo "${roomName}" ha sido eliminado`, 'warning', 4000);
       
       // Recargar rooms
-      loadRooms();
+      if (typeof loadRoomsRef.current === 'function') {
+        loadRoomsRef.current();
+      }
       // Si estábamos en ese grupo, volver a lista
-      if (currentRoom && currentRoom.id === data.roomId) {
+      if (currentRoomRef.current && currentRoomRef.current.id === data.roomId) {
         selectRoom(null);
       }
     });
@@ -272,6 +321,8 @@ export const useChat = (userId, token) => {
       setLoading(false);
     }
   }, [userId, token]);
+
+  loadRoomsRef.current = loadRooms;
 
   // Cargar contactos
   const loadContacts = useCallback(async () => {
@@ -835,6 +886,10 @@ export const useChat = (userId, token) => {
       loadContacts();
     }
   }, [userId, token, loadRooms, loadContacts]);
+
+  roomsRef.current = rooms;
+  currentRoomRef.current = currentRoom;
+  selectRoomRef.current = selectRoom;
 
   return {
     // Estado

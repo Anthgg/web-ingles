@@ -437,91 +437,22 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
         </div>
       </div>
 
-      {/* OTP por SMS o Email */}
+      {/* OTP por Correo Electrónico */}
       <div className="card config-card mt-4">
         <div className="card-body">
-          <h5 className="section-title mb-3">OTP por SMS o Correo</h5>
-          <p className="muted mb-2">Recibe un código OTP por el canal elegido para validar tu contacto.</p>
+          <h5 className="section-title mb-3">Verificación por Correo Electrónico</h5>
+          <p className="muted mb-2">Recibe un código OTP en tu correo electrónico para validar tu cuenta.</p>
+
+          <div className="alert alert-info mb-3">
+            <FaEnvelope className="me-2"/>
+            Se enviará un código a: <strong>{userInfo?.email}</strong>
+          </div>
 
           <div className="d-flex align-items-center mb-3">
-            <div className="form-check form-check-inline">
-              <input className="form-check-input" type="radio" name="otpCh" id="cfgOtpEmail" checked={otpChannel==='email'} onChange={() => setOtpChannel('email')} />
-              <label className="form-check-label" htmlFor="cfgOtpEmail"><FaEnvelope className="me-1"/> Correo</label>
-            </div>
-            <div className="form-check form-check-inline">
-              <input className="form-check-input" type="radio" name="otpCh" id="cfgOtpSms" checked={otpChannel==='sms'} onChange={() => setOtpChannel('sms')} />
-              <label className="form-check-label" htmlFor="cfgOtpSms"><FaSms className="me-1"/> SMS</label>
-            </div>
-            <button className="btn btn-outline-primary btn-sm ms-2" onClick={handleSendOtp} disabled={otpSending || otpCooldown>0}>
+            <button className="btn btn-outline-primary btn-sm" onClick={handleSendOtp} disabled={otpSending || otpCooldown>0}>
               {otpCooldown>0 ? `Reenviar en ${otpCooldown}s` : 'Enviar código'}
             </button>
           </div>
-
-          {/* Phone Form: show if SMS selected and no phone saved */}
-          {otpChannel === 'sms' && showPhoneForm && (
-            <div className="alert alert-info mb-3">
-              <h6 className="mb-2"><FaSms className="me-2"/>Configura tu número de teléfono</h6>
-              <p className="small mb-2">Selecciona tu país e ingresa tu número (sin código de país).</p>
-              
-              <div className="row g-2 mb-2">
-                <div className="col-md-5">
-                  <label className="form-label small mb-1 fw-bold">País</label>
-                  <select 
-                    className="form-select form-select-sm"
-                    value={countryCode}
-                    onChange={(e) => setCountryCode(e.target.value)}
-                  >
-                    {countries.map(country => (
-                      <option key={country.code} value={country.code}>
-                        {country.name} ({country.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-md-7">
-                  <label className="form-label small mb-1 fw-bold">Número de teléfono</label>
-                  <div className="input-group input-group-sm">
-                    <span className="input-group-text bg-primary text-white fw-bold">{countryCode}</span>
-                    <input
-                      type="tel"
-                      className="form-control"
-                      placeholder={selectedCountry.example}
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                      maxLength="14"
-                    />
-                  </div>
-                  <div className="form-text small mt-1">
-                    <strong>Número completo:</strong> {countryCode}{phoneNumber || selectedCountry.example}
-                    <br/>
-                    <span className="text-muted">Ejemplo para {selectedCountry.name}: {countryCode}{selectedCountry.example}</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="d-flex gap-2 mt-3">
-                <button className="btn btn-primary btn-sm" onClick={handleSavePhone} disabled={savingPhone || !phoneNumber}>
-                  {savingPhone ? '⏳ Guardando...' : '💾 Guardar'}
-                </button>
-                <button className="btn btn-outline-secondary btn-sm" onClick={() => {
-                  setShowPhoneForm(false);
-                  setPhoneNumber('');
-                }}>
-                  ❌ Cancelar
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Show phone status if SMS channel selected and phone exists */}
-          {otpChannel === 'sms' && !showPhoneForm && userPhone && (
-            <div className="alert alert-success d-flex align-items-center mb-3">
-              <FaCheck className="me-2"/> Teléfono configurado: <strong className="ms-1">{userPhone}</strong>
-              <button className="btn btn-link btn-sm ms-auto" onClick={() => setShowPhoneForm(true)}>
-                Cambiar
-              </button>
-            </div>
-          )}
 
           <div className="d-flex align-items-center gap-2" style={{maxWidth: 360}}>
             <CodeInput value={otpCode} onChange={setOtpCode} length={6} />
@@ -530,7 +461,7 @@ const Configuracion = ({ userInfo, darkMode, toggleTheme, token, showError, show
             </button>
           </div>
 
-          <div className="small text-muted mt-2">Usa este paso para validar tu correo o teléfono. No reemplaza tu 2FA por app a menos que lo desactives.</div>
+          <div className="small text-muted mt-2">Usa este paso para validar tu correo. No reemplaza tu 2FA por app a menos que lo desactives.</div>
         </div>
       </div>
     </div>

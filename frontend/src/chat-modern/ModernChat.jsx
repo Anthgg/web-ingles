@@ -108,6 +108,7 @@ const ModernChat = () => {
               onBack={handleBackToList}
               isMobile={isMobile}
               connected={connected}
+              currentUserId={userId}
             />
             <ChatWindow
               messages={messages}

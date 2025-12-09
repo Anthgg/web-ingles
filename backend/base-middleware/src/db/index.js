@@ -388,6 +388,20 @@ function mapDbError(error, context = {}) {
     attempt: context.attempt,
   };
 
+  // Log completo del error para debugging
+  if (context.logger) {
+    context.logger.error({
+      sqlError: {
+        message: error.message,
+        sqlMessage: error.sqlMessage,
+        sql: error.sql,
+        code: error.code,
+        errno: error.errno,
+        sqlState: error.sqlState
+      }
+    }, 'Error SQL detallado');
+  }
+
   let statusCode = 500;
   let message = 'Error en la base de datos.';
 

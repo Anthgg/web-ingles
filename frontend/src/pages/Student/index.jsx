@@ -11,20 +11,16 @@ const StudentPage = () => {
       loading,
       error,
       success,
-      clases,
       asistencias,
       calificaciones,
       asignaciones,
       misCursos,
-      cursosDisponibles,
     },
     setActiveModule,
     showError,
     showSuccess,
     fetchMisCursos,
-    fetchCursosDisponibles,
-    inscribirEnCurso,
-    cancelarInscripcionCurso,
+    fetchMisAsistencias,
     logout,
     updateTwoFactorStatus,
   } = useDashboardData();
@@ -46,13 +42,9 @@ const StudentPage = () => {
       setSuccess={showSuccess}
       misAsistencias={asistencias}
       misCalificaciones={calificaciones}
-      misClases={clases}
       misCursos={misCursos}
-      cursosDisponibles={cursosDisponibles}
       fetchMisCursos={fetchMisCursos}
-      fetchCursosDisponibles={fetchCursosDisponibles}
-      onInscribirseCurso={inscribirEnCurso}
-      onCancelarInscripcionCurso={cancelarInscripcionCurso}
+      fetchMisAsistencias={fetchMisAsistencias}
       token={token}
       showError={showError}
       showSuccess={showSuccess}
